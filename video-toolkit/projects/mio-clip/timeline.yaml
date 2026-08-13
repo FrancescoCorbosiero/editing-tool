@@ -13,7 +13,7 @@
 
 output:
   path: output/clip.mp4   # dove finisce il file, dentro questa cartella
-  size: [1920, 1080]      # orizzontale. Per i social verticali: [1080, 1920]
+  size: [1080, 1920]      # verticale 9:16: reel, TikTok, Shorts
   fps: 30
   preset: medium          # piu' lento = file piu' piccolo, stessa qualita'
   crf: 20                 # 18 alta qualita' | 23 normale | 28 compresso
