@@ -14,10 +14,15 @@ from typing import Any
 
 import yaml
 
-# transitions.py e' un registry senza dipendenze pesanti: importarlo qui non
-# viola il confine "models non conosce MoviePy" (vedi il suo docstring).
+# transitions.py e motion.py sono registry senza dipendenze pesanti: importarli
+# qui non viola il confine "models non conosce MoviePy" (vedi i loro docstring).
+from .motion import names as motion_names
 from .transitions import DIRECTIONS, TransitionRequest, names as transition_names
 from .transitions import normalize_direction
+
+# Movimento massimo accettato: oltre il 200% quasi certamente e' un errore di
+# battitura (amount: 20 invece di 0.20), e il render diventerebbe lentissimo.
+MAX_MOTION_AMOUNT = 2.0
 
 # Modalita' di adattamento di un'immagine/video al canvas di output
 FIT_MODES = ("contain", "cover", "stretch")
@@ -37,6 +42,15 @@ def _validate_transition_type(value: Any, where: str) -> str:
         raise ConfigError(
             f"{where}: transition_type '{name}' non esiste. "
             f"Disponibili: {', '.join(transition_names())}"
+        )
+    return name
+
+
+def _validate_motion(value: Any, where: str) -> str:
+    name = str(value).strip().lower()
+    if name not in motion_names():
+        raise ConfigError(
+            f"{where}: motion '{name}' non esiste. Disponibili: {', '.join(motion_names())}"
         )
     return name
 
@@ -176,6 +190,8 @@ class Segment:
     speed: float = 1.0
     mute: bool = False
     color: tuple[int, int, int] = (0, 0, 0)
+    motion: str | None = None      # solo per image: vedi vedit/motion.py
+    amount: float = 0.15           # quanto movimento: 0.15 = ingrandimento del 15%
     label: str = ""                # solo per leggibilita' nei log
 
     @classmethod
@@ -211,6 +227,22 @@ class Segment:
 
         if data.get("direction") is not None:
             seg.direction = _validate_direction(data["direction"], where)
+
+        if data.get("motion") is not None:
+            if seg_type != "image":
+                raise ConfigError(
+                    f"{where}: motion si applica solo ai segmenti 'image' "
+                    f"(questo e' '{seg_type}')"
+                )
+            seg.motion = _validate_motion(data["motion"], where)
+
+        if data.get("amount") is not None:
+            seg.amount = float(data["amount"])
+            if not 0 < seg.amount <= MAX_MOTION_AMOUNT:
+                raise ConfigError(
+                    f"{where}: amount deve stare fra 0 e {MAX_MOTION_AMOUNT:g} "
+                    "(e' una frazione: 0.2 = 20%)"
+                )
 
         if "color" in data:
             seg.color = tuple(int(c) for c in data["color"])  # type: ignore[assignment]

@@ -127,6 +127,7 @@ vedit/
   models.py        Schema del progetto e parsing YAML. Nessuna dipendenza da MoviePy.
   timeline.py      Dove inizia e finisce ogni segmento. Matematica pura, niente MoviePy.
   transitions.py   Registry delle transizioni: aggiungerne una è un file solo.
+  motion.py        Registry dei movimenti sulle immagini (Ken Burns).
   report.py        Il riepilogo di --check. Legge i metadati con ffprobe.
   builder.py       Traduce il progetto in clip MoviePy. È qui che vive la logica di montaggio.
   progress.py      La barra di avanzamento dell'export.
@@ -176,9 +177,11 @@ deve rispondere subito.
 | `transition` | tutti | durata della transizione in **entrata**, sovrascrive il default |
 | `transition_type` | tutti | `crossfade` (default) \| `fade_through_black` \| `slide` \| `wipe` \| `cut` |
 | `direction` | slide, wipe | bordo da cui **arriva** il nuovo clip: `left` \| `right` \| `top` \| `bottom` |
+| `motion` | image | `zoom_in` \| `zoom_out` \| `pan_left` \| `pan_right` \| `pan_up` \| `pan_down` |
+| `amount` | image con `motion` | quanto movimento, in frazione: `0.15` = 15% (default) |
 | `speed` | video | `2.0` doppia velocità, `0.5` slow motion |
 | `mute` | video | esclude l'audio del segmento |
-| `fit` | video, image | sovrascrive il default |
+| `fit` | video, image | sovrascrive il default (ignorato se c'è `motion`) |
 
 ### `overlays` — sovrapposti a tutto
 
@@ -259,6 +262,66 @@ Le regole del contratto:
 - `directional=True` se usi `ctx.direction`;
 - **importa MoviePy dentro la funzione**, non in cima al file: `models.py` importa
   questo modulo per validare i nomi e non deve trascinarsi dietro MoviePy.
+
+---
+
+## Movimento sulle immagini (effetto Ken Burns)
+
+Una foto immobile sullo schermo è morta: l'occhio la legge in un secondo e poi si
+stacca. Il rimedio classico — dal documentarista **Ken Burns**, che animava così
+le fotografie d'archivio — è muovere lentamente l'inquadratura sull'immagine.
+
+```yaml
+- type: image
+  src: ../../assets/foto1.jpg
+  duration: 5
+  motion: zoom_in      # oppure zoom_out, pan_left, pan_right, pan_up, pan_down
+  amount: 0.15         # 15% di ingrandimento: quello è lo spazio su cui si muove
+```
+
+`amount` è **la corsa disponibile**, non la velocità: l'immagine viene ingrandita
+di quella frazione oltre il canvas, e il movimento consuma esattamente quell'eccedenza
+nell'arco della `duration`. Un segmento più lungo con lo stesso `amount` si muove
+più piano. Valori fra `0.1` e `0.25` sono quasi impercettibili, che è l'obiettivo:
+se noti il movimento, è troppo.
+
+I nomi descrivono **la camera**, non l'immagine, come in ogni software di montaggio:
+`pan_right` sposta l'inquadratura verso destra, quindi l'immagine sullo schermo
+scivola verso sinistra.
+
+Con `motion`, il campo `fit` viene ignorato: il movimento deve riempire il canvas,
+altrimenti muoverebbe anche le bande nere. `--check` te lo ricorda.
+
+### Quanto costa il movimento
+
+Non è gratis, e i due tipi non costano affatto uguale:
+
+| `motion` | export | rapporto |
+|---|---|---|
+| nessuno | 46s | 1.0× |
+| `pan_*` | 40s | 0.9× |
+| `zoom_*` | 140s | 3.0× |
+
+*12s di video (3 immagini da 4s), 1920×1080 @ 30 fps, sorgenti 3000×2000,
+`preset: ultrafast`, macchina a 4 core. Conta il rapporto, non i secondi.*
+
+La differenza è nell'implementazione, e vale la pena capirla:
+
+- un **pan** ingrandisce l'immagine **una volta sola** e poi ritaglia una finestra
+  diversa a ogni fotogramma. Ritagliare è affettare un array numpy: costa quanto
+  copiare la memoria, cioè niente. (Esce leggermente più veloce del caso statico
+  perché produce fotogrammi già delle dimensioni esatte del canvas.)
+- uno **zoom** deve **riscalare** l'immagine a ogni fotogramma, con
+  un'interpolazione di qualità su milioni di pixel, 30 volte al secondo.
+
+Quindi: usa `pan_*` liberamente, e `zoom_*` con criterio — o almeno monta con
+`--preview` e tieni lo zoom per l'export finale. Per rimisurare sul tuo materiale:
+
+```bash
+# stessa timeline, una volta senza motion e una con
+time python -m vedit render progetto-statico.yaml
+time python -m vedit render progetto-zoom.yaml
+```
 
 ---
 

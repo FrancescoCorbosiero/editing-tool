@@ -87,6 +87,8 @@ def _segment_detail(seg: Segment, info: dict | None) -> str:
         return f"colore rgb{tuple(seg.color)}"
 
     parts = [Path(seg.src).name] if seg.src else []
+    if seg.motion:
+        parts.append(f"{seg.motion} {seg.amount * 100:g}%")
     if seg.type == "video":
         if seg.start is not None or seg.end is not None:
             end = f"{seg.end:g}" if seg.end is not None else "fine"
@@ -136,6 +138,13 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
         requests.append(seg.transition_request(project.defaults))
 
         _check_cuts(report, i, seg, info)
+
+        if seg.motion and seg.fit:
+            report.warnings.append(
+                f"timeline[{i}]: fit '{seg.fit}' viene ignorato perche' c'e' motion "
+                f"'{seg.motion}' (il movimento riempie sempre il canvas, altrimenti "
+                "muoverebbe anche le bande nere)"
+            )
 
     # Stesso calcolo del builder: la durata effettiva vale per tutti i tipi,
     # la sovrapposizione solo per quelli che la usano (vedi transitions.py).

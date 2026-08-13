@@ -43,10 +43,13 @@ timeline:
   - type: image
     src: ../../assets/foto1.jpg
     duration: 4
-    fit: contain          # foto verticale: meglio le bande che il ritaglio
     transition: 1.2       # questa transizione vince sul default globale
     transition_type: wipe # una linea scopre la foto sopra il video precedente
     direction: left       # ...entrando dal bordo sinistro
+    # Una foto ferma per quattro secondi e' morta: l'inquadratura sale piano.
+    # Con motion il fit non serve: il movimento riempie sempre il canvas.
+    motion: pan_up
+    amount: 0.2           # ingrandimento del 20%, ed e' anche la corsa disponibile
     label: foto-1
 
   - type: video

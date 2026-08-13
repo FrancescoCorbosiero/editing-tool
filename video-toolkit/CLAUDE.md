@@ -45,6 +45,8 @@ Senza MoviePy:
 - **`vedit/transitions.py`** — registry `nome → funzione` delle transizioni. Le sue
   funzioni **usano** MoviePy ma lo importano al loro interno, perché `models.py`
   importa questo modulo per validare i nomi. Non spostare quegli import in cima.
+- **`vedit/motion.py`** — registry dei movimenti sulle immagini (Ken Burns), stessa
+  regola sugli import di `transitions.py`.
 - **`vedit/report.py`** — il riepilogo di `render --check`. Legge i metadati con ffprobe.
 - **`vedit/ffmpeg_tools.py`** — subprocess verso ffmpeg/ffprobe. Nessun MoviePy.
 

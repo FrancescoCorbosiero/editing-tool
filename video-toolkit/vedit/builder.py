@@ -29,8 +29,9 @@ from moviepy import (
     vfx,
 )
 
-from . import transitions
+from . import motion, transitions
 from .models import AudioSpec, Overlay, Project, Segment
+from .motion import MotionContext
 from .progress import RenderProgress, format_duration
 from .timeline import clamp_overlap, plan, total_duration
 from .transitions import TransitionContext, TransitionRequest
@@ -128,6 +129,13 @@ def build_segment(seg: Segment, project: Project):
             raise FileNotFoundError(f"Immagine non trovata: {path}")
         duration = seg.duration or project.defaults.image_duration
         clip = ImageClip(str(path)).with_duration(duration)
+
+        if seg.motion:
+            # Il movimento adatta l'immagine da solo: deve ingrandirla oltre il
+            # canvas per avere spazio su cui muoversi, quindi salta fit_clip e
+            # place_on_canvas e restituisce gia' un clip delle misure giuste.
+            ctx = MotionContext(amount=seg.amount, size=size, duration=duration)
+            return motion.get(seg.motion).apply(clip, ctx)
 
     elif seg.type == "color":
         clip = ColorClip(size=size, color=seg.color, duration=seg.duration)
