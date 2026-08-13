@@ -126,6 +126,7 @@ finché non provi ad aprirlo.
 vedit/
   models.py        Schema del progetto e parsing YAML. Nessuna dipendenza da MoviePy.
   timeline.py      Dove inizia e finisce ogni segmento. Matematica pura, niente MoviePy.
+  transitions.py   Registry delle transizioni: aggiungerne una è un file solo.
   report.py        Il riepilogo di --check. Legge i metadati con ffprobe.
   builder.py       Traduce il progetto in clip MoviePy. È qui che vive la logica di montaggio.
   progress.py      La barra di avanzamento dell'export.
@@ -161,7 +162,8 @@ deve rispondere subito.
 
 ### `defaults`
 
-`transition` (secondi), `image_duration` (secondi), `fit` (`contain` | `cover` | `stretch`).
+`transition` (secondi), `transition_type`, `direction`, `image_duration` (secondi),
+`fit` (`contain` | `cover` | `stretch`).
 
 ### `timeline` — segmenti in fila
 
@@ -171,7 +173,9 @@ deve rispondere subito.
 | `src` | video, image | percorso del sorgente |
 | `start`, `end` | video | punti di taglio **nel sorgente**, non nella timeline |
 | `duration` | image, color | |
-| `transition` | tutti | crossfade in **entrata**, sovrascrive il default |
+| `transition` | tutti | durata della transizione in **entrata**, sovrascrive il default |
+| `transition_type` | tutti | `crossfade` (default) \| `fade_through_black` \| `slide` \| `wipe` \| `cut` |
+| `direction` | slide, wipe | bordo da cui **arriva** il nuovo clip: `left` \| `right` \| `top` \| `bottom` |
 | `speed` | video | `2.0` doppia velocità, `0.5` slow motion |
 | `mute` | video | esclude l'audio del segmento |
 | `fit` | video, image | sovrascrive il default |
@@ -187,6 +191,74 @@ deve rispondere subito.
 
 `src`, `volume`, `fade_in`, `fade_out`, `start`, `replace`
 (`true` sostituisce l'audio dei segmenti, `false` lo somma).
+
+---
+
+## Transizioni
+
+Ogni segmento dichiara come **entra** in scena. La transizione appartiene al clip
+che arriva, non alla coppia: `transition_type` sul terzo segmento descrive il
+passaggio dal secondo al terzo.
+
+```yaml
+- type: image
+  src: ../../assets/foto1.jpg
+  transition: 1.0            # quanto dura
+  transition_type: wipe      # come avviene
+  direction: left            # da quale bordo arriva (solo slide e wipe)
+```
+
+| `transition_type` | Cosa fa | Sovrappone? |
+|---|---|---|
+| `crossfade` | dissolvenza incrociata: i due clip si vedono insieme | sì |
+| `fade_through_black` | il primo si spegne nel nero, il secondo si accende | no |
+| `slide` | il nuovo clip entra scorrendo da un bordo | sì |
+| `wipe` | una linea attraversa lo schermo e scopre il nuovo clip | sì |
+| `cut` | stacco netto, nessuna transizione | no |
+
+**«Sovrappone» cambia la durata del montaggio.** Una transizione sovrapposta fa
+coesistere i due clip per la sua durata, quindi il totale si accorcia: due clip da
+4s con 1s di crossfade fanno 7s, non 8. Le altre lasciano i clip in fila e si
+consumano al loro interno: `fade_through_black` spende metà della durata sulla coda
+del primo clip e metà sulla testa del secondo, e il totale resta 8s.
+
+In ogni caso la durata viene limitata a **metà del clip più corto** fra i due
+coinvolti: `--check` te lo dice quando succede.
+
+`direction` indica sempre il bordo **da cui arriva** il nuovo clip: `left` = entra
+da sinistra muovendosi verso destra. Sono accettati anche `up`/`down` come sinonimi
+di `top`/`bottom`.
+
+### Aggiungere una transizione tua
+
+Le transizioni vivono in `vedit/transitions.py`, in un registry `nome → funzione`.
+Aggiungerne una è un file solo: scrivi la funzione, decorala, ed è disponibile in
+YAML, in validazione e in `--check` senza toccare nient'altro.
+
+```python
+@register("fade_through_white", overlaps=False)
+def fade_through_white(prev, current, ctx):
+    """Come fade_through_black, ma passando dal bianco: piu' aggressivo, da usare raramente."""
+    from moviepy import vfx
+
+    half = ctx.duration / 2.0
+    bianco = [255, 255, 255]
+    return (
+        prev.with_effects([vfx.FadeOut(half, final_color=bianco)]),
+        current.with_effects([vfx.FadeIn(half, initial_color=bianco)]),
+    )
+```
+
+Le regole del contratto:
+
+- la firma è sempre `(prev, current, ctx) → (prev, current)`. Puoi modificare **anche
+  il clip precedente**: è così che `fade_through_black` gli mette la dissolvenza in uscita;
+- `ctx` contiene `duration` (già limitata), `direction` e `size` (il canvas);
+- `overlaps=True` se i due clip devono coesistere nel tempo, `False` se restano in fila.
+  Questa scelta la usa `timeline.py` per calcolare la durata finale;
+- `directional=True` se usi `ctx.direction`;
+- **importa MoviePy dentro la funzione**, non in cima al file: `models.py` importa
+  questo modulo per validare i nomi e non deve trascinarsi dietro MoviePy.
 
 ---
 

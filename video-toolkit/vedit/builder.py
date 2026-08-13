@@ -29,9 +29,11 @@ from moviepy import (
     vfx,
 )
 
+from . import transitions
 from .models import AudioSpec, Overlay, Project, Segment
 from .progress import RenderProgress, format_duration
-from .timeline import plan, total_duration
+from .timeline import clamp_overlap, plan, total_duration
+from .transitions import TransitionContext, TransitionRequest
 
 log = logging.getLogger("vedit")
 
@@ -142,34 +144,52 @@ def build_segment(seg: Segment, project: Project):
 # Montaggio con transizioni
 # --------------------------------------------------------------------------
 
-def concat_with_transitions(clips: list, transitions: list[float], size: tuple[int, int]):
+def concat_with_transitions(clips: list, requests: list[TransitionRequest],
+                            size: tuple[int, int]):
     """
-    Concatena i clip sovrapponendoli per la durata della transizione.
+    Concatena i clip applicando la transizione in ENTRATA di ciascuno.
 
-    `transitions[i]` e' la dissolvenza in ENTRATA del clip i-esimo
-    (transitions[0] viene ignorato: il primo clip non ha nulla su cui dissolvere).
+    `requests[i]` descrive come entra il clip i-esimo (requests[0] viene
+    ignorato: il primo clip non ha nulla che lo preceda).
 
-    Il trucco chiave: ogni clip parte a `cursore - durata_transizione`, cosi'
-    si sovrappone al precedente, e riceve un CrossFadeIn della stessa durata.
-    Senza la sovrapposizione, la dissolvenza avverrebbe sul nero.
+    Il trucco chiave delle transizioni "con sovrapposizione": il clip parte a
+    `fine del precedente - durata`, cosi' i due coesistono nel tempo. Senza
+    quella sovrapposizione una dissolvenza incrociata dissolverebbe dal nero.
+    Le transizioni senza sovrapposizione (stacco, dissolvenza al nero) lasciano
+    i clip in fila e si consumano al loro interno.
+
+    Chi applica l'effetto e' il registry in transitions.py: questa funzione non
+    sa cosa sia un wipe, sa solo che qualcuno gli restituira' due clip modificati.
     """
     if not clips:
         raise ValueError("Nessun clip da concatenare")
 
+    durations = [clip.duration for clip in clips]
+    specs = [transitions.get(req.type) for req in requests]
+
+    # La durata effettiva vale per tutti i tipi (anche quelli che non
+    # sovrappongono: una dissolvenza al nero piu' lunga del clip non ha senso),
+    # mentre la sovrapposizione la chiedono solo i tipi che ne hanno bisogno.
+    effective = [0.0] * len(clips)
+    overlaps = [0.0] * len(clips)
+    for i in range(1, len(clips)):
+        effective[i] = clamp_overlap(requests[i].duration, durations[i - 1], durations[i])
+        overlaps[i] = effective[i] if specs[i].overlaps else 0.0
+
     # Il calcolo di inizio/fine sta in timeline.py, che non dipende da MoviePy:
     # cosi' `render --check` puo' mostrare le stesse cifre senza importare nulla.
-    placements = plan([clip.duration for clip in clips], transitions)
+    placements = plan(durations, overlaps)
 
-    placed = []
-    for clip, place in zip(clips, placements):
+    placed: list = []
+    for i, (clip, place) in enumerate(zip(clips, placements)):
         current = clip.with_start(place.start)
 
-        if place.overlap > 0:
-            # CrossFadeIn agisce sulla maschera alpha: se il clip non ne ha una,
-            # gliela aggiungiamo opaca, altrimenti l'effetto non ha su cosa agire.
-            if current.mask is None:
-                current = current.with_mask()
-            current = current.with_effects([vfx.CrossFadeIn(place.overlap)])
+        if i > 0 and effective[i] > 0:
+            ctx = TransitionContext(
+                duration=effective[i], direction=requests[i].direction, size=size
+            )
+            previous, current = specs[i].apply(placed[-1], current, ctx)
+            placed[-1] = previous
 
         placed.append(current)
 
@@ -270,16 +290,14 @@ def build(project: Project):
 
     log.info("Costruzione di %d segmenti...", len(project.timeline))
     clips = []
-    transitions = []
+    requests = []
     for i, seg in enumerate(project.timeline):
         clips.append(build_segment(seg, project))
         # La transizione dichiarata sul segmento vince sul default globale
-        transitions.append(
-            seg.transition if seg.transition is not None else project.defaults.transition
-        )
+        requests.append(seg.transition_request(project.defaults))
         log.info("  [%d] %s %s (%.2fs)", i, seg.type, seg.label or seg.src or "", clips[-1].duration)
 
-    video = concat_with_transitions(clips, transitions, size)
+    video = concat_with_transitions(clips, requests, size)
     log.info("Durata del montaggio: %.2fs", video.duration)
 
     if project.overlays:

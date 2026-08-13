@@ -14,6 +14,11 @@ from typing import Any
 
 import yaml
 
+# transitions.py e' un registry senza dipendenze pesanti: importarlo qui non
+# viola il confine "models non conosce MoviePy" (vedi il suo docstring).
+from .transitions import DIRECTIONS, TransitionRequest, names as transition_names
+from .transitions import normalize_direction
+
 # Modalita' di adattamento di un'immagine/video al canvas di output
 FIT_MODES = ("contain", "cover", "stretch")
 
@@ -24,6 +29,26 @@ FONT_SUFFIXES = (".ttf", ".otf", ".ttc", ".woff", ".woff2")
 
 def _looks_like_font_file(value: str) -> bool:
     return Path(value).suffix.lower() in FONT_SUFFIXES
+
+
+def _validate_transition_type(value: Any, where: str) -> str:
+    name = str(value).strip().lower()
+    if name not in transition_names():
+        raise ConfigError(
+            f"{where}: transition_type '{name}' non esiste. "
+            f"Disponibili: {', '.join(transition_names())}"
+        )
+    return name
+
+
+def _validate_direction(value: Any, where: str) -> str:
+    direction = normalize_direction(value)
+    if direction not in DIRECTIONS:
+        raise ConfigError(
+            f"{where}: direction '{value}' non valida. Usa una di {', '.join(DIRECTIONS)} "
+            "(accettati anche up/down)"
+        )
+    return direction
 
 
 class ConfigError(ValueError):
@@ -107,7 +132,9 @@ class OutputSpec:
 class Defaults:
     """Valori applicati ai segmenti che non li specificano."""
 
-    transition: float = 0.0      # durata crossfade fra un segmento e il successivo
+    transition: float = 0.0      # durata della transizione fra un segmento e il successivo
+    transition_type: str = "crossfade"
+    direction: str = "left"      # bordo di provenienza per slide e wipe
     image_duration: float = 4.0  # durata di un'immagine se non indicata
     fit: str = "cover"
 
@@ -123,6 +150,10 @@ class Defaults:
             d.fit = str(data["fit"])
         if d.fit not in FIT_MODES:
             raise ConfigError(f"defaults.fit deve essere uno di {FIT_MODES}")
+        if "transition_type" in data:
+            d.transition_type = _validate_transition_type(data["transition_type"], "defaults")
+        if "direction" in data:
+            d.direction = _validate_direction(data["direction"], "defaults")
         return d
 
 
@@ -139,7 +170,9 @@ class Segment:
     end: float | None = None       # solo per type=video: taglio OUT nel sorgente
     duration: float | None = None  # obbligatorio per image/color
     fit: str | None = None
-    transition: float | None = None  # crossfade in ENTRATA su questo segmento
+    transition: float | None = None       # durata della transizione in ENTRATA
+    transition_type: str | None = None    # vedi vedit/transitions.py
+    direction: str | None = None          # bordo di provenienza per slide e wipe
     speed: float = 1.0
     mute: bool = False
     color: tuple[int, int, int] = (0, 0, 0)
@@ -173,6 +206,12 @@ class Segment:
             if seg.fit not in FIT_MODES:
                 raise ConfigError(f"{where}: fit deve essere uno di {FIT_MODES}")
 
+        if data.get("transition_type") is not None:
+            seg.transition_type = _validate_transition_type(data["transition_type"], where)
+
+        if data.get("direction") is not None:
+            seg.direction = _validate_direction(data["direction"], where)
+
         if "color" in data:
             seg.color = tuple(int(c) for c in data["color"])  # type: ignore[assignment]
 
@@ -204,6 +243,19 @@ class Segment:
         if end is None:
             return None
         return max(end - start, 0.0) / self.speed
+
+    def transition_request(self, defaults: "Defaults") -> TransitionRequest:
+        """
+        Come questo segmento entra in scena: durata, tipo, direzione.
+
+        Quello che il segmento dichiara vince sul default globale, campo per
+        campo: si puo' cambiare solo il tipo e tenere la durata del progetto.
+        """
+        return TransitionRequest(
+            duration=self.transition if self.transition is not None else defaults.transition,
+            type=self.transition_type or defaults.transition_type,
+            direction=self.direction or defaults.direction,
+        )
 
     def describe(self) -> str:
         """Etichetta breve per log e riepiloghi: label se c'e', altrimenti il file."""

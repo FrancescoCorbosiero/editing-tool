@@ -42,6 +42,9 @@ Senza MoviePy:
   Questo permette di testare la validazione in millisecondi. Non violare questo confine.
 - **`vedit/timeline.py`** — matematica delle posizioni (inizio/fine/sovrapposizione).
   Usata sia dal builder sia da `--check`: una sola implementazione, nessuna divergenza.
+- **`vedit/transitions.py`** — registry `nome → funzione` delle transizioni. Le sue
+  funzioni **usano** MoviePy ma lo importano al loro interno, perché `models.py`
+  importa questo modulo per validare i nomi. Non spostare quegli import in cima.
 - **`vedit/report.py`** — il riepilogo di `render --check`. Legge i metadati con ffprobe.
 - **`vedit/ffmpeg_tools.py`** — subprocess verso ffmpeg/ffprobe. Nessun MoviePy.
 

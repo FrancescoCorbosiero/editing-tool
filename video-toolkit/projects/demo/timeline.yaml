@@ -17,7 +17,9 @@ output:
   background: [0, 0, 0]   # colore delle bande in modalita' "contain"
 
 defaults:
-  transition: 0.8         # crossfade fra i segmenti, in secondi
+  transition: 0.8         # durata della transizione fra i segmenti, in secondi
+  transition_type: crossfade   # crossfade | fade_through_black | slide | wipe | cut
+  direction: left         # per slide e wipe: bordo da cui ARRIVA il nuovo clip
   image_duration: 4       # durata di un'immagine se non specificata
   fit: cover              # contain (bande nere) | cover (ritaglia) | stretch (deforma)
 
@@ -43,6 +45,8 @@ timeline:
     duration: 4
     fit: contain          # foto verticale: meglio le bande che il ritaglio
     transition: 1.2       # questa transizione vince sul default globale
+    transition_type: wipe # una linea scopre la foto sopra il video precedente
+    direction: left       # ...entrando dal bordo sinistro
     label: foto-1
 
   - type: video
@@ -51,6 +55,9 @@ timeline:
     end: 47
     speed: 1.0            # 2.0 = doppia velocita', 0.5 = slow motion
     mute: false
+    # Il nero fra i due clip si legge come un salto di tempo. A differenza del
+    # crossfade non sovrappone nulla, quindi non accorcia il montaggio.
+    transition_type: fade_through_black
     label: chiusura
 
 # ---------------------------------------------------------------------------

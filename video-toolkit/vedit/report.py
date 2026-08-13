@@ -15,9 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import transitions
 from .ffmpeg_tools import FFmpegError, probe
 from .models import Project, Segment
-from .timeline import Placement, plan
+from .timeline import Placement, clamp_overlap, plan
+from .transitions import TransitionRequest
 
 
 @dataclass
@@ -29,6 +31,19 @@ class SegmentRow:
     label: str
     detail: str
     placement: Placement
+    transition: TransitionRequest | None = None   # None sul primo segmento
+
+    def transition_label(self) -> str:
+        """Come si legge la transizione in entrata nel riepilogo."""
+        if self.transition is None:
+            return "-"
+        if self.transition.type == "cut" or self.transition.duration <= 0:
+            return "cut"
+        spec = transitions.get(self.transition.type)
+        text = f"{self.transition.type} {self.transition.duration:.2f}s"
+        if spec.directional:
+            text += f" da {self.transition.direction}"
+        return text
 
 
 @dataclass
@@ -97,7 +112,7 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
     cache: dict[Path, dict | None] = {}
     kinds: dict[Path, str] = {}   # video o image: un jpeg non ha un vero frame rate
     durations: list[float] = []
-    requested: list[float] = []
+    requests: list[TransitionRequest] = []
     infos: list[dict | None] = []
 
     for i, seg in enumerate(project.timeline):
@@ -118,26 +133,36 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
             )
             duration = 0.0
         durations.append(duration)
-
-        transition = seg.transition if seg.transition is not None else project.defaults.transition
-        requested.append(transition)
+        requests.append(seg.transition_request(project.defaults))
 
         _check_cuts(report, i, seg, info)
 
-    placements = plan(durations, requested)
+    # Stesso calcolo del builder: la durata effettiva vale per tutti i tipi,
+    # la sovrapposizione solo per quelli che la usano (vedi transitions.py).
+    effective = [0.0] * len(durations)
+    overlaps = [0.0] * len(durations)
+    for i in range(1, len(durations)):
+        effective[i] = clamp_overlap(requests[i].duration, durations[i - 1], durations[i])
+        overlaps[i] = effective[i] if transitions.get(requests[i].type).overlaps else 0.0
+
+    placements = plan(durations, overlaps)
 
     for i, (seg, place, info) in enumerate(zip(project.timeline, placements, infos)):
+        applied = None if i == 0 else TransitionRequest(
+            duration=effective[i], type=requests[i].type, direction=requests[i].direction
+        )
         report.rows.append(SegmentRow(
             index=i,
             kind=seg.type,
             label=seg.label,
             detail=_segment_detail(seg, info),
             placement=place,
+            transition=applied,
         ))
-        if place.overlap > 0 and place.overlap < requested[i] - 1e-6:
+        if i > 0 and effective[i] < requests[i].duration - 1e-6:
             report.warnings.append(
-                f"timeline[{i}]: transizione ridotta da {requested[i]:g}s a "
-                f"{place.overlap:.2f}s (non puo' superare meta' dei clip coinvolti)"
+                f"timeline[{i}]: transizione ridotta da {requests[i].duration:g}s a "
+                f"{effective[i]:.2f}s (non puo' superare meta' dei clip coinvolti)"
             )
 
     _check_sources_consistency(report, project, cache, kinds)
@@ -243,15 +268,17 @@ def format_report(report: Report) -> str:
     )
     lines.append(f"Output   : {report.output_path}")
     lines.append("")
-    lines.append("  #  inizio     fine    durata  transiz.  tipo   segmento")
-
     label_width = max((len(row.label) for row in report.rows), default=0)
+    trans_width = max((len(row.transition_label()) for row in report.rows), default=0)
+    lines.append(
+        f"  #  inizio     fine    durata  {'transizione':<{trans_width}}  tipo   segmento"
+    )
+
     for row in report.rows:
         p = row.placement
-        overlap = f"{p.overlap:5.2f}s" if p.overlap else "     -"
         lines.append(
             f"{row.index:3d}  {format_time(p.start):>7}  {format_time(p.end):>7}"
-            f"  {p.duration:7.2f}s  {overlap}   {row.kind:<5}  "
+            f"  {p.duration:7.2f}s  {row.transition_label():<{trans_width}}  {row.kind:<5}  "
             f"{row.label:<{label_width}}  {row.detail}".rstrip()
         )
 
