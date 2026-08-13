@@ -71,6 +71,9 @@ python -m vedit probe assets/riprese.mp4
 # Font utilizzabili per testo e sottotitoli su questa macchina
 python -m vedit fonts
 
+# Tempo e battiti di una traccia, per montare a tempo di musica
+python -m vedit beats assets/musica.mp3
+
 # Riepilogo della timeline: cosa cade dove, e cosa non torna
 python -m vedit render projects/demo/timeline.yaml --check
 
@@ -149,6 +152,7 @@ vedit/
   timeline.py      Dove inizia e finisce ogni segmento. Matematica pura, niente MoviePy.
   transitions.py   Registry delle transizioni: aggiungerne una è un file solo.
   motion.py        Registry dei movimenti sulle immagini (Ken Burns).
+  beats.py         Tempo e battiti di una traccia audio (ffmpeg + numpy).
   subtitles.py     Lettura dei file .srt. Solo testo, nessuna dipendenza.
   fonts.py         Trova un font utilizzabile e manda a capo il testo.
   proxies.py       Copie leggere dei sorgenti, con cache per impronta del file.
