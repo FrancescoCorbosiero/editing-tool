@@ -5,6 +5,14 @@ assets/*
 !assets/.gitkeep
 !assets/README.md
 proxies/
+
+# Ogni progetto in projects/ si porta dietro i suoi file e i suoi render:
+# il montaggio (timeline.yaml) si versiona, i media no.
+projects/*/assets/*
+!projects/*/assets/.gitkeep
+!projects/*/assets/README.md
+projects/*/output/*
+!projects/*/output/.gitkeep
 *.mp4
 *.mov
 *.mkv

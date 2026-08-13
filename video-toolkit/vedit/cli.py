@@ -125,6 +125,23 @@ def cmd_proxy(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_beats(args: argparse.Namespace) -> int:
+    """Legge il battito di una traccia: e' il passo prima di montarci sopra."""
+    from .beats import analyze, describe
+
+    ensure_ffmpeg()
+    if not Path(args.path).exists():
+        raise FileNotFoundError(args.path)
+
+    grid = analyze(args.path, cutoff=args.cutoff, sensitivity=args.sensitivity)
+    if args.json:
+        print(json.dumps({"bpm": grid.bpm, "period": grid.period,
+                          "beats": grid.beats, "onsets": grid.onsets}, indent=2))
+    else:
+        print(describe(grid, args.path))
+    return 0
+
+
 def cmd_fonts(args: argparse.Namespace) -> int:
     """Elenca i font utilizzabili: senza un font il testo su video non si disegna."""
     from .fonts import describe
@@ -184,6 +201,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_proxy.add_argument("--force", action="store_true",
                          help="rigenera anche i proxy gia' presenti")
     p_proxy.set_defaults(func=cmd_proxy)
+
+    p_beats = sub.add_parser("beats", help="trova il tempo e i battiti di una traccia audio")
+    p_beats.add_argument("path", help="file audio o video da analizzare")
+    p_beats.add_argument("--cutoff", type=int, default=150,
+                         help="taglio del passa-basso in Hz: piu' basso isola meglio "
+                              "la cassa, piu' alto prende anche i rullanti (default: 150)")
+    p_beats.add_argument("--sensitivity", type=float, default=1.5,
+                         help="quanto e' facile che un suono conti come colpo: "
+                              "abbassala se ne trova pochi (default: 1.5)")
+    p_beats.add_argument("--json", action="store_true", help="stampa i tempi in JSON")
+    p_beats.set_defaults(func=cmd_beats)
 
     p_fonts = sub.add_parser("fonts", help="elenca i font utilizzabili per testo e sottotitoli")
     p_fonts.set_defaults(func=cmd_fonts)

@@ -1,0 +1,135 @@
+# ===========================================================================
+# IL MIO CLIP — montaggio a tempo di musica
+#
+# Struttura copiata dal riferimento (non le immagini: la GRAMMATICA):
+#   tenuta lunga  ->  tagli a un battito  ->  raffica a mezzo battito  ->  chiusura
+#
+# La musica va a 118.4 BPM, quindi UN BATTITO DURA 0.507s. Tutte le durate qui
+# sotto sono multipli di quel numero, ed e' per questo che i cambi di scena
+# cadono sulla cassa:
+#     mezzo battito  0.253s      due battiti    1.014s
+#     un battito     0.507s      quattro        2.028s
+#
+# La traccia audio parte dal PRIMO battito del brano (l'abbiamo estratta da
+# 0.170s), quindi l'istante zero del montaggio e' gia' un battito: da li' in
+# poi basta contare.
+#
+#   vedit render projects/mio-clip/timeline.yaml --check
+#   vedit render projects/mio-clip/timeline.yaml --preview
+# ===========================================================================
+
+output:
+  path: output/clip.mp4
+  size: [1080, 1920]      # verticale 9:16
+  fps: 30
+  preset: medium
+  crf: 20
+
+defaults:
+  transition: 0            # NESSUNA dissolvenza: questo stile vive di stacchi
+  transition_type: cut     # 13 dei 16 cambi del riferimento sono stacchi netti
+  fit: cover               # riempi il quadro verticale, ritaglia i lati
+
+# ---------------------------------------------------------------------------
+# TIMELINE
+# `start` e `end` sono i secondi DENTRO assets/riferimento.mp4: ogni segmento
+# ritaglia un pezzo diverso dello stesso file sorgente.
+# ---------------------------------------------------------------------------
+timeline:
+
+  # --- TENUTA: 4 battiti. Si stabilisce il tono e si lascia respirare, cosi'
+  #     quando parte la raffica si sente il cambio di passo.
+  - type: video
+    src: assets/riferimento.mp4
+    start: 1.20
+    end: 3.23              # 2.028s = 4 battiti
+    label: volto
+
+  # --- RITMO: un battito a testa. Immagini molto diverse fra loro, perche' su
+  #     mezzo secondo l'occhio coglie solo il colpo d'insieme.
+  - type: video
+    src: assets/riferimento.mp4
+    start: 6.36
+    end: 6.87              # 1 battito
+    label: fuoco
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 4.23
+    end: 4.74
+    label: scale
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 5.24
+    end: 5.75
+    label: pianeti
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 9.95
+    end: 10.46
+    label: bianconero
+
+  # --- RAFFICA: sei stacchi a mezzo battito. E' il momento in cui il montaggio
+  #     accelera; funziona solo perche' prima c'era la tenuta lunga.
+  - type: video
+    src: assets/riferimento.mp4
+    start: 8.26
+    end: 8.51              # 0.253s = mezzo battito
+    label: poster
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 7.93
+    end: 8.18
+    label: labbra
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 9.06
+    end: 9.31
+    label: cartone
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 7.18
+    end: 7.43
+    label: volto-fuso
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 9.53
+    end: 9.78
+    label: occhioni
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 6.92
+    end: 7.17
+    label: verde
+
+  # --- CHIUSURA: si rallenta. Un battito di buio, poi due di quiete: senza
+  #     questa frenata il clip finirebbe di colpo e sembrerebbe troncato.
+  - type: video
+    src: assets/riferimento.mp4
+    start: 10.80
+    end: 11.31
+    label: buio
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 11.60
+    end: 12.61             # 1.014s = 2 battiti
+    label: occhi-chiusi
+
+# ---------------------------------------------------------------------------
+# AUDIO: la traccia estratta dal riferimento, dal primo battito in poi.
+# `replace: true` butta via l'audio dei singoli spezzoni - che sarebbe un
+# collage di frammenti mezzo secondo l'uno - e tiene solo la musica continua.
+# ---------------------------------------------------------------------------
+audio:
+  src: assets/musica.m4a
+  volume: 1.0
+  fade_out: 0.4            # l'ultimo mezzo secondo sfuma, non si tronca
+  replace: true

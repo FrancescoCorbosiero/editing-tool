@@ -47,6 +47,8 @@ Senza MoviePy:
   importa questo modulo per validare i nomi. Non spostare quegli import in cima.
 - **`vedit/motion.py`** — registry dei movimenti sulle immagini (Ken Burns), stessa
   regola sugli import di `transitions.py`.
+- **`vedit/beats.py`** — tempo e battiti di una traccia audio, per montare a tempo
+  di musica. Chiama ffmpeg e fa i conti con numpy.
 - **`vedit/subtitles.py`** — parsing dei `.srt`. Solo manipolazione di testo.
 - **`vedit/proxies.py`** — copie leggere dei sorgenti, con cache basata sull'impronta
   del file. Chiama ffmpeg, non MoviePy.
