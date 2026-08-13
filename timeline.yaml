@@ -1,0 +1,90 @@
+# ---------------------------------------------------------------------------
+# PROGETTO DEMO
+#
+# Ogni percorso e' relativo alla cartella che contiene QUESTO file.
+# Renderizza con:
+#   python -m vedit render projects/demo/timeline.yaml --preview
+# ---------------------------------------------------------------------------
+
+output:
+  path: ../../output/demo.mp4
+  size: [1920, 1080]      # canvas finale: tutto viene adattato a queste dimensioni
+  fps: 30
+  codec: libx264
+  audio_codec: aac
+  preset: medium          # ultrafast | veryfast | medium | slow  (piu' lento = file piu' piccolo)
+  crf: 20                 # 18 alta qualita' | 23 default | 28 compresso
+  background: [0, 0, 0]   # colore delle bande in modalita' "contain"
+
+defaults:
+  transition: 0.8         # crossfade fra i segmenti, in secondi
+  image_duration: 4       # durata di un'immagine se non specificata
+  fit: cover              # contain (bande nere) | cover (ritaglia) | stretch (deforma)
+
+# ---------------------------------------------------------------------------
+# TIMELINE: i segmenti vengono messi in fila, sovrapposti per la transizione
+# ---------------------------------------------------------------------------
+timeline:
+
+  - type: color           # cartello nero iniziale, per far respirare l'apertura
+    color: [0, 0, 0]
+    duration: 1.0
+    label: intro
+
+  - type: video
+    src: ../../assets/input.mp4
+    start: 5              # taglio IN nel file sorgente (secondi)
+    end: 12               # taglio OUT
+    fit: cover
+    label: apertura
+
+  - type: image
+    src: ../../assets/foto1.jpg
+    duration: 4
+    fit: contain          # foto verticale: meglio le bande che il ritaglio
+    transition: 1.2       # questa transizione vince sul default globale
+    label: foto-1
+
+  - type: video
+    src: ../../assets/input.mp4
+    start: 40
+    end: 47
+    speed: 1.0            # 2.0 = doppia velocita', 0.5 = slow motion
+    mute: false
+    label: chiusura
+
+# ---------------------------------------------------------------------------
+# OVERLAY: sovrapposti a tutto il montaggio (logo, watermark, titoli)
+# position: [x, y] in pixel, oppure "center" / ["center", "top"]
+# ---------------------------------------------------------------------------
+overlays:
+
+  - type: image
+    src: ../../assets/logo.png
+    start: 1.0
+    duration: 4.0
+    width: 220            # l'altezza si calcola da sola mantenendo le proporzioni
+    position: [60, 60]
+    fade: 0.5
+    opacity: 0.9
+
+  # Gli overlay di testo richiedono un font: passa il percorso a un .ttf
+  # - type: text
+  #   text: "Il mio primo montaggio"
+  #   font: ../../assets/fonts/Inter-Bold.ttf
+  #   font_size: 72
+  #   color: white
+  #   start: 1.5
+  #   duration: 3
+  #   position: ["center", 820]
+  #   fade: 0.6
+
+# ---------------------------------------------------------------------------
+# AUDIO: traccia aggiuntiva (musica o voce fuori campo)
+# ---------------------------------------------------------------------------
+# audio:
+#   src: ../../assets/musica.mp3
+#   volume: 0.25
+#   fade_in: 1.0
+#   fade_out: 2.0
+#   replace: false        # false = si somma all'audio originale, true = lo sostituisce

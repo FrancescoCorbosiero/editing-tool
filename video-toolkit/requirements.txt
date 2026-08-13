@@ -1,0 +1,8 @@
+# MoviePy 2.x: l'API e' incompatibile con la 1.x, non abbassare la versione
+moviepy>=2.1.1
+PyYAML>=6.0
+numpy>=1.25
+Pillow>=10.0
+
+# Sviluppo (opzionali)
+pytest>=8.0

@@ -1,0 +1,28 @@
+# Output e materiale sorgente: pesanti, non vanno nel repo
+output/*
+!output/.gitkeep
+assets/*
+!assets/.gitkeep
+!assets/README.md
+proxies/
+*.mp4
+*.mov
+*.mkv
+*.mp3
+*.wav
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Sistema
+.DS_Store
+Thumbs.db
