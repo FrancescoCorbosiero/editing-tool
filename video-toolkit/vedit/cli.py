@@ -59,7 +59,8 @@ def cmd_render(args: argparse.Namespace) -> int:
     from .builder import close_all, render  # import pigro: MoviePy e' lento da caricare
 
     try:
-        target = render(project, dry_run=args.dry_run, preview=args.preview)
+        target = render(project, dry_run=args.dry_run, preview=args.preview,
+                        use_proxy=args.use_proxy)
     finally:
         close_all()
 
@@ -82,6 +83,45 @@ def cmd_probe(args: argparse.Namespace) -> int:
     print(f"Video     : {info['video_codec']}")
     print(f"Audio     : {info['audio_codec'] or 'assente'}")
     print(f"Dimensione: {info['size_bytes'] / 1_000_000:.1f} MB")
+    return 0
+
+
+def cmd_proxy(args: argparse.Namespace) -> int:
+    """Genera le copie leggere dei sorgenti su cui montare."""
+    import time
+
+    from .proxies import build_all, proxy_dir, total_size
+
+    ensure_ffmpeg()
+    project = load_project(args)
+
+    started = time.monotonic()
+    print(f"Proxy a {args.height}p in {proxy_dir(project)}\n")
+
+    # La riga "in corso" si riscrive solo se siamo in un terminale: dentro un
+    # file di log il ritorno carrello non cancella niente e sporca l'output.
+    tty = sys.stdout.isatty()
+
+    def annuncia(source: Path) -> None:
+        if tty:
+            print(f"  {source.name:<40} in corso...", end="\r", flush=True)
+
+    def riporta(result) -> None:
+        print(f"  {result.source.name:<40} {result.status}".ljust(70))
+
+    results = build_all(project, height=args.height, force=args.force,
+                        on_start=annuncia, on_done=riporta)
+
+    creati = sum(1 for r in results if r.created)
+    elapsed = time.monotonic() - started
+    print(
+        f"\n{len(results)} {'sorgente' if len(results) == 1 else 'sorgenti'} · "
+        f"{creati} generati ora · {total_size(results) / 1_000_000:.1f} MB in "
+        f"{proxy_dir(project).name}/ · {elapsed:.1f}s"
+    )
+    if results:
+        print("Ora monta con: python -m vedit render "
+              f"{args.project} --preview --use-proxy")
     return 0
 
 
@@ -127,12 +167,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.add_argument("--check", action="store_true",
                           help="valida il progetto e stampa il riepilogo della timeline, "
                                "senza costruire ne' esportare nulla")
+    p_render.add_argument("--use-proxy", action="store_true",
+                          help="monta sui proxy invece che sui sorgenti originali "
+                               "(generali prima con `vedit proxy`)")
     p_render.set_defaults(func=cmd_render)
 
     p_probe = sub.add_parser("probe", help="mostra i metadati di un file")
     p_probe.add_argument("path")
     p_probe.add_argument("--json", action="store_true")
     p_probe.set_defaults(func=cmd_probe)
+
+    p_proxy = sub.add_parser("proxy", help="genera copie leggere dei sorgenti su cui montare")
+    p_proxy.add_argument("project", help="percorso del timeline.yaml")
+    p_proxy.add_argument("--height", type=int, default=480,
+                         help="altezza dei proxy in pixel (default: 480)")
+    p_proxy.add_argument("--force", action="store_true",
+                         help="rigenera anche i proxy gia' presenti")
+    p_proxy.set_defaults(func=cmd_proxy)
 
     p_fonts = sub.add_parser("fonts", help="elenca i font utilizzabili per testo e sottotitoli")
     p_fonts.set_defaults(func=cmd_fonts)

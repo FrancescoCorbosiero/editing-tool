@@ -1,4 +1,4 @@
-.PHONY: install test check dry-run demo preview clean
+.PHONY: install test check dry-run demo preview proxy clean
 
 install:
 	python -m venv .venv
@@ -20,5 +20,9 @@ preview:
 demo:
 	python -m vedit render projects/demo/timeline.yaml
 
+proxy:
+	python -m vedit proxy projects/demo/timeline.yaml
+
 clean:
-	rm -rf output/*.mp4 proxies/ .pytest_cache __pycache__ vedit/__pycache__ tests/__pycache__
+	rm -rf output/*.mp4 projects/*/proxies/ .pytest_cache __pycache__ \
+	       vedit/__pycache__ tests/__pycache__

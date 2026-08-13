@@ -48,6 +48,8 @@ Senza MoviePy:
 - **`vedit/motion.py`** — registry dei movimenti sulle immagini (Ken Burns), stessa
   regola sugli import di `transitions.py`.
 - **`vedit/subtitles.py`** — parsing dei `.srt`. Solo manipolazione di testo.
+- **`vedit/proxies.py`** — copie leggere dei sorgenti, con cache basata sull'impronta
+  del file. Chiama ffmpeg, non MoviePy.
 - **`vedit/fonts.py`** — ricerca dei font e a capo del testo (usa Pillow, non MoviePy).
 - **`vedit/report.py`** — il riepilogo di `render --check`. Legge i metadati con ffprobe.
 - **`vedit/ffmpeg_tools.py`** — subprocess verso ffmpeg/ffprobe. Nessun MoviePy.

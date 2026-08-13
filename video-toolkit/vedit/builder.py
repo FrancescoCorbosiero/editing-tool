@@ -33,6 +33,7 @@ from . import motion, transitions
 from .fonts import find_font, font_error_message, wrap_text
 from .models import AudioSpec, ConfigError, Overlay, Project, Segment, SubtitlesSpec, TextStyle
 from .motion import MotionContext
+from .proxies import find_proxy
 from .subtitles import load_srt
 from .progress import RenderProgress, format_duration
 from .timeline import clamp_overlap, plan, total_duration
@@ -104,13 +105,33 @@ def place_on_canvas(clip, size: tuple[int, int], background: tuple[int, int, int
 # Costruzione dei singoli segmenti
 # --------------------------------------------------------------------------
 
-def build_segment(seg: Segment, project: Project):
+def source_path(seg: Segment, project: Project, use_proxy: bool) -> Path:
+    """
+    Il file da aprire per questo segmento: l'originale o il suo proxy.
+
+    Il proxy si usa solo se e' stato chiesto E se esiste: chi ha appena
+    aggiunto una ripresa non deve vedere il render fallire, deve vedere un
+    avviso e il montaggio che va avanti sull'originale.
+    """
+    original = project.resolve(seg.src)
+    if not use_proxy:
+        return original
+
+    proxy = find_proxy(project, original)
+    if proxy is None:
+        log.warning("Nessun proxy per %s: uso l'originale (lancia `vedit proxy`).",
+                    original.name)
+        return original
+    return proxy
+
+
+def build_segment(seg: Segment, project: Project, use_proxy: bool = False):
     """Trasforma un Segment del YAML in un clip MoviePy pronto per il montaggio."""
     size = project.output.size
     fit_mode = seg.fit or project.defaults.fit
 
     if seg.type == "video":
-        path = project.resolve(seg.src)
+        path = source_path(seg, project, use_proxy)
         if not path.exists():
             raise FileNotFoundError(f"Sorgente video non trovata: {path}")
         clip = VideoFileClip(str(path))
@@ -389,7 +410,7 @@ def build_audio(spec: AudioSpec, project: Project, video_duration: float):
 # Entry point
 # --------------------------------------------------------------------------
 
-def build(project: Project):
+def build(project: Project, use_proxy: bool = False):
     """Costruisce il clip finale, pronto per write_videofile()."""
     size = project.output.size
 
@@ -397,7 +418,7 @@ def build(project: Project):
     clips = []
     requests = []
     for i, seg in enumerate(project.timeline):
-        clips.append(build_segment(seg, project))
+        clips.append(build_segment(seg, project, use_proxy))
         # La transizione dichiarata sul segmento vince sul default globale
         requests.append(seg.transition_request(project.defaults))
         log.info("  [%d] %s %s (%.2fs)", i, seg.type, seg.label or seg.src or "", clips[-1].duration)
@@ -450,7 +471,8 @@ def discard_partial(target: Path) -> list[Path]:
     return removed
 
 
-def render(project: Project, dry_run: bool = False, preview: bool = False) -> Path | None:
+def render(project: Project, dry_run: bool = False, preview: bool = False,
+           use_proxy: bool = False) -> Path | None:
     """Costruisce ed esporta il video. Restituisce il percorso del file prodotto."""
     out = project.output
 
@@ -464,8 +486,14 @@ def render(project: Project, dry_run: bool = False, preview: bool = False) -> Pa
         out.preset = "ultrafast"
         out.crf = 30
         out.path = out.path.with_name(out.path.stem + "_preview" + out.path.suffix)
+    elif use_proxy:
+        # Un export a piena risoluzione fatto sui proxy sarebbe indistinguibile
+        # da quello buono, finche' non lo si guarda: gli si cambia nome, cosi'
+        # il file finale non viene mai sovrascritto da una versione a 480p.
+        log.warning("Export dai proxy: qualita' ridotta, non e' il file definitivo.")
+        out.path = out.path.with_name(out.path.stem + "_proxy" + out.path.suffix)
 
-    video = build(project)
+    video = build(project, use_proxy=use_proxy)
 
     if dry_run:
         log.info("dry-run: nessun file scritto. Durata finale %.2fs", video.duration)

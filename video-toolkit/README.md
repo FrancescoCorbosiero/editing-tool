@@ -67,6 +67,10 @@ python -m vedit render projects/demo/timeline.yaml --check
 # Anteprima veloce: metà risoluzione, encoding ultrafast → output/demo_preview.mp4
 python -m vedit render projects/demo/timeline.yaml --preview
 
+# Copie leggere dei sorgenti, per montare su 4K senza aspettare
+python -m vedit proxy projects/demo/timeline.yaml
+python -m vedit render projects/demo/timeline.yaml --preview --use-proxy
+
 # Export finale
 python -m vedit render projects/demo/timeline.yaml
 
@@ -137,6 +141,7 @@ vedit/
   motion.py        Registry dei movimenti sulle immagini (Ken Burns).
   subtitles.py     Lettura dei file .srt. Solo testo, nessuna dipendenza.
   fonts.py         Trova un font utilizzabile e manda a capo il testo.
+  proxies.py       Copie leggere dei sorgenti, con cache per impronta del file.
   report.py        Il riepilogo di --check. Legge i metadati con ffprobe.
   builder.py       Traduce il progetto in clip MoviePy. È qui che vive la logica di montaggio.
   progress.py      La barra di avanzamento dell'export.
@@ -463,6 +468,68 @@ La 2.0 ha rotto l'API: `moviepy.editor` non esiste più, `subclip` è `subclippe
 `set_position` è `with_position`, gli effetti sono classi applicate con
 `.with_effects([...])`. Se copi codice da Stack Overflow e ottieni `AttributeError`,
 quasi certamente è questo.
+
+---
+
+## Montare su 4K: i proxy
+
+Montare direttamente su file 4K è insopportabile: ogni fotogramma va decodificato,
+ridimensionato e ricomposto, e quel lavoro viene buttato via al tentativo successivo.
+La soluzione standard nei software di montaggio si chiama **proxy**: si genera una
+volta una copia a bassa risoluzione di ogni sorgente, si monta su quella, e l'export
+finale torna agli originali. Il montaggio non cambia — tagli, transizioni e durate
+lavorano sul *tempo*, non sui pixel — cambia solo quanto aspetti.
+
+```bash
+# una volta sola: crea proxies/ accanto al file di progetto
+python -m vedit proxy projects/demo/timeline.yaml
+
+# mentre monti: veloce
+python -m vedit render projects/demo/timeline.yaml --preview --use-proxy
+
+# export finale: sempre dagli originali
+python -m vedit render projects/demo/timeline.yaml
+```
+
+Misurato su un sorgente 3840×2160, montaggio di 10s verso 1080p:
+
+| operazione | tempo |
+|---|---|
+| anteprima dai sorgenti 4K | 51s |
+| generazione dei proxy (una volta sola) | 2.5s |
+| anteprima dai proxy | **9.6s** |
+
+**5× più veloce**, e la generazione si ripaga alla prima anteprima. Su riprese
+reali la generazione è più lenta (il sorgente sintetico di questa misura è
+pochissimi MB), ma il guadagno per anteprima è lo stesso.
+
+### La cache
+
+Il nome del proxy contiene un'impronta del contenuto del sorgente:
+
+```
+proxies/riprese-480p-35e057a4c37b.mp4
+```
+
+Se il file originale cambia, cambia l'impronta, il proxy vecchio non viene più
+trovato e ne nasce uno nuovo. Non esiste un controllo «è aggiornato?» da
+sbagliare, e non c'è modo di montare per errore su un proxy che non corrisponde
+più al suo originale. L'impronta si calcola su dimensione, primo e ultimo MiB:
+leggere per intero un file da 20 GB costerebbe, a ogni controllo, il tempo che
+i proxy servono a risparmiare.
+
+`--height` genera proxy a un'altezza diversa (convivono con quelli già fatti),
+`--force` li rigenera. Un sorgente già più piccolo dell'altezza richiesta viene
+saltato: non ha senso rimpicciolire ciò che è già piccolo.
+
+### Le due protezioni
+
+- **`--use-proxy` senza `--preview`** aggiunge `_proxy` al nome del file: un
+  export a piena risoluzione fatto sui proxy è indistinguibile da quello buono
+  finché non lo guardi, e non deve poterlo sovrascrivere.
+- **Proxy mancante** non è un errore: `vedit` avvisa e monta quel segmento
+  sull'originale. Chi ha appena aggiunto una ripresa non deve vedere un render
+  che fallisce.
 
 ---
 
