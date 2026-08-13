@@ -1,0 +1,99 @@
+# ===========================================================================
+# IL MIO CLIP
+#
+# Questo file DESCRIVE il montaggio. Non contiene video: contiene istruzioni.
+# Ogni percorso qui dentro parte da QUESTA cartella, quindi `assets/foto1.jpg`
+# significa `projects/mio-clip/assets/foto1.jpg`.
+#
+# Il giro di lavoro, tre comandi (dalla cartella video-toolkit/):
+#   1. vedit render projects/mio-clip/timeline.yaml --check      cosa verrebbe fuori
+#   2. vedit render projects/mio-clip/timeline.yaml --preview    anteprima veloce
+#   3. vedit render projects/mio-clip/timeline.yaml              export finale
+# ===========================================================================
+
+output:
+  path: output/clip.mp4   # dove finisce il file, dentro questa cartella
+  size: [1920, 1080]      # orizzontale. Per i social verticali: [1080, 1920]
+  fps: 30
+  preset: medium          # piu' lento = file piu' piccolo, stessa qualita'
+  crf: 20                 # 18 alta qualita' | 23 normale | 28 compresso
+  background: [0, 0, 0]   # colore delle bande, quando servono
+
+# Valori usati da tutti i segmenti che non dicono altro.
+defaults:
+  transition: 0.6         # durata delle transizioni, in secondi
+  transition_type: crossfade
+  image_duration: 4       # quanto resta in scena una foto senza durata propria
+  fit: cover              # riempi il quadro, semmai ritaglia
+
+# ---------------------------------------------------------------------------
+# TIMELINE: i pezzi vanno in scena in quest'ordine, uno dopo l'altro.
+# `label` serve solo a te, per ritrovarti nel riepilogo di --check.
+# ---------------------------------------------------------------------------
+timeline:
+
+  # 1. Un nero iniziale. Sembra sprecato, ma da' un attimo di respiro prima
+  #    che parta il contenuto, ed e' su cui il titolo si stacca meglio.
+  - type: color
+    color: [0, 0, 0]
+    duration: 1.2
+    label: apertura
+
+  # 2. Una foto che si muove: senza movimento un'immagine ferma per quattro
+  #    secondi e' morta. `amount` e' quanto ingrandisce, ed e' anche lo spazio
+  #    che il movimento ha per muoversi.
+  - type: image
+    src: assets/foto1.jpg
+    duration: 4
+    motion: zoom_in
+    amount: 0.18
+    label: foto
+
+  # 3. Un pezzo di video. start/end sono i secondi DENTRO il file sorgente,
+  #    non nella timeline: qui prendiamo i primi 5 secondi di ripresa.mp4.
+  - type: video
+    src: assets/ripresa.mp4
+    start: 0
+    end: 5
+    transition_type: wipe    # una linea scopre la ripresa sopra la foto
+    direction: left          # ...entrando dal bordo sinistro
+    transition: 0.8
+    label: ripresa
+
+  # 4. Chiusura nel nero. `fade_through_black` non sovrappone niente: il pezzo
+  #    prima si spegne e questo si accende, e si legge come "fine".
+  - type: color
+    color: [0, 0, 0]
+    duration: 1.5
+    transition_type: fade_through_black
+    transition: 0.8
+    label: chiusura
+
+# ---------------------------------------------------------------------------
+# OVERLAY: roba sovrapposta a TUTTO il montaggio (titoli, loghi).
+# `start` e `duration` sono nel tempo della timeline finale.
+# ---------------------------------------------------------------------------
+overlays:
+
+  - type: text
+    text: "Il mio primo clip"
+    start: 0.4
+    duration: 3.0
+    font_size: 84            # senza `font`, vedit sceglie un font di sistema
+    color: white
+    stroke_color: black      # contorno: stacca le lettere da qualsiasi sfondo
+    stroke_width: 2
+    max_width: 0.8           # va a capo da solo entro l'80% della larghezza
+    align: center
+    position: ["center", "center"]
+    fade: 0.5                # comparsa e scomparsa morbide
+
+# ---------------------------------------------------------------------------
+# AUDIO: togli il cancelletto quando avrai una traccia in assets/.
+# ---------------------------------------------------------------------------
+# audio:
+#   src: assets/musica.mp3
+#   volume: 0.8
+#   fade_in: 0.5
+#   fade_out: 1.5
+#   replace: false      # false = si somma all'audio del video, true = lo sostituisce
