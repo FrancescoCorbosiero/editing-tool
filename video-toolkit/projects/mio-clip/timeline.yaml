@@ -1,99 +1,135 @@
 # ===========================================================================
-# IL MIO CLIP
+# IL MIO CLIP — montaggio a tempo di musica
 #
-# Questo file DESCRIVE il montaggio. Non contiene video: contiene istruzioni.
-# Ogni percorso qui dentro parte da QUESTA cartella, quindi `assets/foto1.jpg`
-# significa `projects/mio-clip/assets/foto1.jpg`.
+# Struttura copiata dal riferimento (non le immagini: la GRAMMATICA):
+#   tenuta lunga  ->  tagli a un battito  ->  raffica a mezzo battito  ->  chiusura
 #
-# Il giro di lavoro, tre comandi (dalla cartella video-toolkit/):
-#   1. vedit render projects/mio-clip/timeline.yaml --check      cosa verrebbe fuori
-#   2. vedit render projects/mio-clip/timeline.yaml --preview    anteprima veloce
-#   3. vedit render projects/mio-clip/timeline.yaml              export finale
+# La musica va a 118.4 BPM, quindi UN BATTITO DURA 0.507s. Tutte le durate qui
+# sotto sono multipli di quel numero, ed e' per questo che i cambi di scena
+# cadono sulla cassa:
+#     mezzo battito  0.253s      due battiti    1.014s
+#     un battito     0.507s      quattro        2.028s
+#
+# La traccia audio parte dal PRIMO battito del brano (l'abbiamo estratta da
+# 0.170s), quindi l'istante zero del montaggio e' gia' un battito: da li' in
+# poi basta contare.
+#
+#   vedit render projects/mio-clip/timeline.yaml --check
+#   vedit render projects/mio-clip/timeline.yaml --preview
 # ===========================================================================
 
 output:
-  path: output/clip.mp4   # dove finisce il file, dentro questa cartella
-  size: [1080, 1920]      # verticale 9:16: reel, TikTok, Shorts
+  path: output/clip.mp4
+  size: [1080, 1920]      # verticale 9:16
   fps: 30
-  preset: medium          # piu' lento = file piu' piccolo, stessa qualita'
-  crf: 20                 # 18 alta qualita' | 23 normale | 28 compresso
-  background: [0, 0, 0]   # colore delle bande, quando servono
+  preset: medium
+  crf: 20
 
-# Valori usati da tutti i segmenti che non dicono altro.
 defaults:
-  transition: 0.6         # durata delle transizioni, in secondi
-  transition_type: crossfade
-  image_duration: 4       # quanto resta in scena una foto senza durata propria
-  fit: cover              # riempi il quadro, semmai ritaglia
+  transition: 0            # NESSUNA dissolvenza: questo stile vive di stacchi
+  transition_type: cut     # 13 dei 16 cambi del riferimento sono stacchi netti
+  fit: cover               # riempi il quadro verticale, ritaglia i lati
 
 # ---------------------------------------------------------------------------
-# TIMELINE: i pezzi vanno in scena in quest'ordine, uno dopo l'altro.
-# `label` serve solo a te, per ritrovarti nel riepilogo di --check.
+# TIMELINE
+# `start` e `end` sono i secondi DENTRO assets/riferimento.mp4: ogni segmento
+# ritaglia un pezzo diverso dello stesso file sorgente.
 # ---------------------------------------------------------------------------
 timeline:
 
-  # 1. Un nero iniziale. Sembra sprecato, ma da' un attimo di respiro prima
-  #    che parta il contenuto, ed e' su cui il titolo si stacca meglio.
-  - type: color
-    color: [0, 0, 0]
-    duration: 1.2
-    label: apertura
-
-  # 2. Una foto che si muove: senza movimento un'immagine ferma per quattro
-  #    secondi e' morta. `amount` e' quanto ingrandisce, ed e' anche lo spazio
-  #    che il movimento ha per muoversi.
-  - type: image
-    src: assets/foto1.jpg
-    duration: 4
-    motion: zoom_in
-    amount: 0.18
-    label: foto
-
-  # 3. Un pezzo di video. start/end sono i secondi DENTRO il file sorgente,
-  #    non nella timeline: qui prendiamo i primi 5 secondi di ripresa.mp4.
+  # --- TENUTA: 4 battiti. Si stabilisce il tono e si lascia respirare, cosi'
+  #     quando parte la raffica si sente il cambio di passo.
   - type: video
-    src: assets/ripresa.mp4
-    start: 0
-    end: 5
-    transition_type: wipe    # una linea scopre la ripresa sopra la foto
-    direction: left          # ...entrando dal bordo sinistro
-    transition: 0.8
-    label: ripresa
+    src: assets/riferimento.mp4
+    start: 1.20
+    end: 3.23              # 2.028s = 4 battiti
+    label: volto
 
-  # 4. Chiusura nel nero. `fade_through_black` non sovrappone niente: il pezzo
-  #    prima si spegne e questo si accende, e si legge come "fine".
-  - type: color
-    color: [0, 0, 0]
-    duration: 1.5
-    transition_type: fade_through_black
-    transition: 0.8
-    label: chiusura
+  # --- RITMO: un battito a testa. Immagini molto diverse fra loro, perche' su
+  #     mezzo secondo l'occhio coglie solo il colpo d'insieme.
+  - type: video
+    src: assets/riferimento.mp4
+    start: 6.36
+    end: 6.87              # 1 battito
+    label: fuoco
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 4.23
+    end: 4.74
+    label: scale
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 5.24
+    end: 5.75
+    label: pianeti
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 9.95
+    end: 10.46
+    label: bianconero
+
+  # --- RAFFICA: sei stacchi a mezzo battito. E' il momento in cui il montaggio
+  #     accelera; funziona solo perche' prima c'era la tenuta lunga.
+  - type: video
+    src: assets/riferimento.mp4
+    start: 8.26
+    end: 8.51              # 0.253s = mezzo battito
+    label: poster
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 7.93
+    end: 8.18
+    label: labbra
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 9.06
+    end: 9.31
+    label: cartone
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 7.18
+    end: 7.43
+    label: volto-fuso
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 9.53
+    end: 9.78
+    label: occhioni
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 6.92
+    end: 7.17
+    label: verde
+
+  # --- CHIUSURA: si rallenta. Un battito di buio, poi due di quiete: senza
+  #     questa frenata il clip finirebbe di colpo e sembrerebbe troncato.
+  - type: video
+    src: assets/riferimento.mp4
+    start: 10.80
+    end: 11.31
+    label: buio
+
+  - type: video
+    src: assets/riferimento.mp4
+    start: 11.60
+    end: 12.61             # 1.014s = 2 battiti
+    label: occhi-chiusi
 
 # ---------------------------------------------------------------------------
-# OVERLAY: roba sovrapposta a TUTTO il montaggio (titoli, loghi).
-# `start` e `duration` sono nel tempo della timeline finale.
+# AUDIO: la traccia estratta dal riferimento, dal primo battito in poi.
+# `replace: true` butta via l'audio dei singoli spezzoni - che sarebbe un
+# collage di frammenti mezzo secondo l'uno - e tiene solo la musica continua.
 # ---------------------------------------------------------------------------
-overlays:
-
-  - type: text
-    text: "Il mio primo clip"
-    start: 0.4
-    duration: 3.0
-    font_size: 84            # senza `font`, vedit sceglie un font di sistema
-    color: white
-    stroke_color: black      # contorno: stacca le lettere da qualsiasi sfondo
-    stroke_width: 2
-    max_width: 0.8           # va a capo da solo entro l'80% della larghezza
-    align: center
-    position: ["center", "center"]
-    fade: 0.5                # comparsa e scomparsa morbide
-
-# ---------------------------------------------------------------------------
-# AUDIO: togli il cancelletto quando avrai una traccia in assets/.
-# ---------------------------------------------------------------------------
-# audio:
-#   src: assets/musica.mp3
-#   volume: 0.8
-#   fade_in: 0.5
-#   fade_out: 1.5
-#   replace: false      # false = si somma all'audio del video, true = lo sostituisce
+audio:
+  src: assets/musica.m4a
+  volume: 1.0
+  fade_out: 0.4            # l'ultimo mezzo secondo sfuma, non si tronca
+  replace: true
