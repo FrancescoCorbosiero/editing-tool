@@ -18,7 +18,7 @@ from pathlib import Path
 from . import transitions
 from .ffmpeg_tools import FFmpegError, probe
 from .models import Project, Segment
-from .timeline import Placement, clamp_overlap, plan
+from .timeline import Placement, clamp_overlap, durations_from_positions, plan
 from .transitions import TransitionRequest
 
 
@@ -82,7 +82,7 @@ def _probe_cached(path: Path, cache: dict[Path, dict | None]) -> dict | None:
     return cache[path]
 
 
-def _segment_detail(seg: Segment, info: dict | None) -> str:
+def _segment_detail(seg: Segment, info: dict | None, duration: float | None = None) -> str:
     """Colonna di destra: sorgente e punti di taglio, se ci sono."""
     if seg.type == "color":
         return f"colore rgb{tuple(seg.color)}"
@@ -91,9 +91,16 @@ def _segment_detail(seg: Segment, info: dict | None) -> str:
     if seg.motion:
         parts.append(f"{seg.motion} {seg.amount * 100:g}%")
     if seg.type == "video":
-        if seg.start is not None or seg.end is not None:
-            end = f"{seg.end:g}" if seg.end is not None else "fine"
-            parts.append(f"[{seg.start or 0:g} -> {end}]")
+        if seg.end is not None:
+            parts.append(f"[{seg.start or 0:g} -> {seg.end:g}]")
+        elif duration is not None:
+            # Con `at` il punto di uscita non e' scritto: lo decide il taglio
+            # successivo. Mostrarlo calcolato evita di far credere che il
+            # segmento arrivi fino alla fine del file.
+            uscita = (seg.start or 0) + duration * seg.speed
+            parts.append(f"[{seg.start or 0:g} -> {uscita:.2f}]")
+        elif seg.start is not None:
+            parts.append(f"[{seg.start:g} -> fine]")
         if seg.speed != 1.0:
             parts.append(f"x{seg.speed:g}")
         if seg.mute:
@@ -147,6 +154,13 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
                 "muoverebbe anche le bande nere)"
             )
 
+    # Montaggio a istanti: le durate vengono dai tagli dichiarati, non dai
+    # segmenti. Stesso calcolo del builder, altrimenti il riepilogo mentirebbe.
+    positions = project.cut_positions()
+    if positions is not None:
+        coda = durations[-1] if durations else 0.0
+        durations = durations_from_positions(positions, coda)
+
     # Stesso calcolo del builder: la durata effettiva vale per tutti i tipi,
     # la sovrapposizione solo per quelli che la usano (vedi transitions.py).
     effective = [0.0] * len(durations)
@@ -166,7 +180,7 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
             index=i,
             kind=seg.type,
             label=seg.label,
-            detail=_segment_detail(seg, info),
+            detail=_segment_detail(seg, info, durations[i]),
             placement=place,
             transition=applied,
         ))

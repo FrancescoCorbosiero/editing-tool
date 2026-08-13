@@ -203,6 +203,7 @@ deve rispondere subito.
 | `src` | video, image | percorso del sorgente |
 | `start`, `end` | video | punti di taglio **nel sorgente**, non nella timeline |
 | `duration` | image, color | |
+| `at` | tutti | istante sul **montaggio** in cui il segmento entra in scena (vedi sotto) |
 | `transition` | tutti | durata della transizione in **entrata**, sovrascrive il default |
 | `transition_type` | tutti | `crossfade` (default) \| `fade_through_black` \| `slide` \| `wipe` \| `cut` |
 | `direction` | slide, wipe | bordo da cui **arriva** il nuovo clip: `left` \| `right` \| `top` \| `bottom` |
@@ -249,6 +250,88 @@ I campi di **stile del testo** valgono sia qui sia nei sottotitoli:
 
 `src`, `volume`, `fade_in`, `fade_out`, `start`, `replace`
 (`true` sostituisce l'audio dei segmenti, `false` lo somma).
+
+---
+
+## Due modi di scrivere un montaggio: durate o istanti
+
+Il modo predefinito è **a durate**: ogni segmento dice quanto dura, e la sua
+posizione è la somma di quelli prima.
+
+```yaml
+timeline:
+  - type: video
+    src: assets/a.mp4
+    start: 4
+    end: 6          # dura 2s, quindi il prossimo comincia a 2s
+```
+
+Funziona benissimo per un racconto. Per la musica è pessimo, e il motivo è uno solo:
+**allungare uno spezzone sposta tutti i tagli successivi.** Se avevi dieci stacchi a
+tempo e allunghi il terzo di un decimo di secondo, gli altri sette vanno fuori tempo
+tutti insieme.
+
+L'alternativa è **a istanti**: ogni segmento dichiara `at`, il momento in cui entra
+in scena. Le durate non si scrivono — un segmento finisce quando comincia il successivo.
+
+```yaml
+timeline:
+  - at: 0.00          # il primo deve sempre partire da 0
+    type: video
+    src: assets/a.mp4
+    start: 1.20       # attenzione: `start` è nel SORGENTE, `at` nel MONTAGGIO
+    label: apertura
+
+  - at: 2.028
+    type: video
+    src: assets/a.mp4
+    start: 6.36
+    label: stacco
+
+  - at: 2.535         # l'ultimo è l'unico che deve dire dove finisce
+    type: video
+    src: assets/a.mp4
+    start: 11.60
+    end: 12.61
+    label: chiusura
+```
+
+Adesso spostare un taglio è **cambiare un numero**, e si muove solo quel taglio.
+La colonna degli `at` diventa il ritmo del montaggio, leggibile a colpo d'occhio:
+passi regolari sono un ritmo costante, passi che si dimezzano sono un'accelerazione.
+
+I due orologi da non confondere:
+
+| campo | in quale tempo |
+|---|---|
+| `at` | il **montaggio finale** — quando lo spettatore vede il cambio |
+| `start` / `end` | il **file sorgente** — da dove si prende il materiale |
+
+Le regole, poche e verificate da `--check`:
+
+- o li hanno **tutti** i segmenti, o nessuno: mezzo montaggio a istanti e mezzo a
+  durate sarebbe illeggibile;
+- il primo `at` è `0`, e gli istanti crescono;
+- l'ultimo segmento dichiara `end` o `duration`, perché non ha un taglio dopo di sé
+  che lo chiuda;
+- niente transizioni **con sovrapposizione** (`crossfade`, `slide`, `wipe`): tirano
+  indietro il clip che entra, cioè spostano proprio l'istante che stai fissando.
+  `cut` e `fade_through_black` convivono benissimo.
+
+### Montare a tempo di musica
+
+`vedit beats` dà il tempo del brano; da lì gli `at` sono aritmetica:
+
+```bash
+$ vedit beats assets/musica.m4a
+Tempo    : 118.4 BPM   (un battito ogni 0.507s)
+```
+
+Un battito `0.507`, mezzo `0.253`, quattro `2.028`. Scrivi gli istanti su quei
+multipli e i cambi di scena cadono sulla cassa. Ma restano numeri normali: se un
+taglio ti piace un pelo più tardi, scrivi il numero che vuoi. La griglia è un
+suggerimento, non un vincolo — nel clip che abbiamo analizzato per costruire questa
+funzione, il montatore umano stava fra 1,5 e 3 fotogrammi dal battito, e funzionava.
 
 ---
 

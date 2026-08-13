@@ -80,6 +80,18 @@ def plan(durations: Sequence[float], overlaps: Sequence[float]) -> list[Placemen
     return placements
 
 
+def durations_from_positions(positions: Sequence[float], last: float) -> list[float]:
+    """
+    Da "quando entra ogni segmento" a "quanto dura ogni segmento".
+
+    Un segmento finisce quando comincia il successivo: e' l'unica regola. Serve
+    solo la durata dell'ultimo, che non ha nessuno dopo di se' a chiuderlo.
+    """
+    if not positions:
+        return []
+    return [positions[i + 1] - positions[i] for i in range(len(positions) - 1)] + [last]
+
+
 def total_duration(placements: Sequence[Placement]) -> float:
     """Durata del montaggio finale: la fine dell'ultimo segmento piazzato."""
     return placements[-1].end if placements else 0.0
