@@ -157,7 +157,8 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
 
     placements = plan(durations, overlaps)
 
-    for i, (seg, place, info) in enumerate(zip(project.timeline, placements, infos)):
+    rows = zip(project.timeline, placements, infos, strict=True)
+    for i, (seg, place, info) in enumerate(rows):
         applied = None if i == 0 else TransitionRequest(
             duration=effective[i], type=requests[i].type, direction=requests[i].direction
         )

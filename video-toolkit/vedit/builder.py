@@ -33,9 +33,9 @@ from . import motion, transitions
 from .fonts import find_font, font_error_message, wrap_text
 from .models import AudioSpec, ConfigError, Overlay, Project, Segment, SubtitlesSpec, TextStyle
 from .motion import MotionContext
+from .progress import RenderProgress, format_duration
 from .proxies import find_proxy
 from .subtitles import load_srt
-from .progress import RenderProgress, format_duration
 from .timeline import clamp_overlap, plan, total_duration
 from .transitions import TransitionContext, TransitionRequest
 
@@ -212,7 +212,7 @@ def concat_with_transitions(clips: list, requests: list[TransitionRequest],
     placements = plan(durations, overlaps)
 
     placed: list = []
-    for i, (clip, place) in enumerate(zip(clips, placements)):
+    for i, (clip, place) in enumerate(zip(clips, placements, strict=True)):
         current = clip.with_start(place.start)
 
         if i > 0 and effective[i] > 0:
@@ -246,7 +246,7 @@ def resolve_background(style: TextStyle):
 
     color = style.bg_color
     rgb = tuple(ImageColor.getrgb(color)[:3]) if isinstance(color, str) else tuple(color)[:3]
-    return (*rgb, int(round(255 * style.bg_opacity)))
+    return (*rgb, round(255 * style.bg_opacity))
 
 
 def make_text_clip(text: str, style: TextStyle, canvas_width: int, duration: float,
@@ -272,19 +272,19 @@ def make_text_clip(text: str, style: TextStyle, canvas_width: int, duration: flo
         text = wrap_text(text, font, style.font_size, wrap, style.stroke_width)
 
     padding = style.padding
-    common = dict(
-        font=str(font),
-        font_size=style.font_size,
-        color=style.color,
-        stroke_color=style.stroke_color,
-        stroke_width=style.stroke_width,
-        bg_color=resolve_background(style),
-        text_align=style.align,
+    common = {
+        "font": str(font),
+        "font_size": style.font_size,
+        "color": style.color,
+        "stroke_color": style.stroke_color,
+        "stroke_width": style.stroke_width,
+        "bg_color": resolve_background(style),
+        "text_align": style.align,
         # Il margine e' anche il riempimento dello sfondo: senza, il rettangolo
         # semitrasparente tocca le lettere e si legge peggio.
-        margin=(padding, padding) if padding else (None, None),
-        duration=duration,
-    )
+        "margin": (padding, padding) if padding else (None, None),
+        "duration": duration,
+    }
 
     return TextClip(text=text, method="label", **common)
 
@@ -421,7 +421,8 @@ def build(project: Project, use_proxy: bool = False):
         clips.append(build_segment(seg, project, use_proxy))
         # La transizione dichiarata sul segmento vince sul default globale
         requests.append(seg.transition_request(project.defaults))
-        log.info("  [%d] %s %s (%.2fs)", i, seg.type, seg.label or seg.src or "", clips[-1].duration)
+        log.info("  [%d] %s %s (%.2fs)", i, seg.type, seg.label or seg.src or "",
+                 clips[-1].duration)
 
     video = concat_with_transitions(clips, requests, size)
     log.info("Durata del montaggio: %.2fs", video.duration)
@@ -436,7 +437,7 @@ def build(project: Project, use_proxy: bool = False):
         layers += build_subtitles(project.subtitles, project, video.duration)
 
     if layers:
-        video = CompositeVideoClip([video] + layers, size=size).with_duration(video.duration)
+        video = CompositeVideoClip([video, *layers], size=size).with_duration(video.duration)
 
     if project.audio is not None:
         from moviepy import CompositeAudioClip
@@ -466,7 +467,7 @@ def discard_partial(target: Path) -> list[Path]:
             if path.exists():
                 path.unlink()
                 removed.append(path)
-        except OSError:  # noqa: PERF203 - un file bloccato non deve mascherare l'interruzione
+        except OSError:
             log.warning("Non sono riuscito a rimuovere %s", path)
     return removed
 
@@ -544,5 +545,5 @@ def close_all() -> None:
         clip = _OPEN_CLIPS.pop()
         try:
             clip.close()
-        except Exception:  # noqa: BLE001 - la chiusura non deve mai far fallire il render
+        except Exception:
             pass

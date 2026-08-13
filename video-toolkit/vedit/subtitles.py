@@ -23,6 +23,7 @@ senza costruire nulla.
 
 from __future__ import annotations
 
+import itertools
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,6 +126,6 @@ def overlaps(cues: list[Cue]) -> list[tuple[Cue, Cue]]:
     ordered = sorted(cues, key=lambda c: c.start)
     return [
         (a, b)
-        for a, b in zip(ordered, ordered[1:])
+        for a, b in itertools.pairwise(ordered)
         if b.start < a.end - 1e-6
     ]

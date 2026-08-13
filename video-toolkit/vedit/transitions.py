@@ -192,12 +192,12 @@ def _wipe_mask(size: tuple[int, int], duration: float, direction: str, clip_dura
     contro il pixel produce un effetto scalettato e "digitale", qualche pixel di
     sfumatura la fa leggere come un taglio pulito.
     """
-    from moviepy import VideoClip
     import numpy as np
+    from moviepy import VideoClip
 
     width, height = size
     span = width if direction in ("left", "right") else height
-    feather = max(2, int(round(span * 0.015)))
+    feather = max(2, round(span * 0.015))
     axis = np.arange(span, dtype=float)
 
     def frame_function(t: float):

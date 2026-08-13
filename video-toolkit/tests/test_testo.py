@@ -11,7 +11,7 @@ from vedit.models import ConfigError, Project, TextStyle
 
 
 def stile(**overrides) -> TextStyle:
-    base = dict(font_size=30, color="white")
+    base = {"font_size": 30, "color": "white"}
     base.update(overrides)
     return TextStyle(**base)
 

@@ -67,6 +67,8 @@ Ogni nuova funzionalità dichiarativa richiede tre modifiche coordinate:
 2. la traduzione in `builder.py`
 3. la riga nella tabella dello schema in `README.md`
 
+Se introduce un termine di montaggio nuovo, aggiungilo anche a `docs/GLOSSARIO.md`.
+
 ## Convenzioni
 
 - Commenti e messaggi utente in **italiano**; nomi di funzioni, variabili e classi in
@@ -80,11 +82,20 @@ Ogni nuova funzionalità dichiarativa richiede tre modifiche coordinate:
 - Nessuna dipendenza nuova senza motivo forte. Lo stack è: moviepy, PyYAML, numpy,
   Pillow. FFmpeg è un binario di sistema, non un pacchetto pip.
 
-## Test
+## Test e lint
 
 ```bash
 pytest -q
+ruff check .
 ```
+
+`ruff check` deve passare (configurazione in `pyproject.toml`). `ruff format` è
+configurato ma **non** va applicato in blocco al codice esistente: i commenti
+allineati in colonna sono voluti e il formatter li schiaccerebbe.
+
+Il confine "niente MoviePy nei moduli leggeri" è verificato da
+`tests/test_confini.py`: se aggiungi un modulo dalla parte leggera, mettilo in
+quella lista.
 
 I test **non devono richiedere file video**: usa segmenti `type: color`, generati in
 memoria. Se una funzionalità ha bisogno di un sorgente reale, genera un file

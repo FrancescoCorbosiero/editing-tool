@@ -89,7 +89,7 @@ def test_file_su_disco_e_codifiche(tmp_path):
 def test_il_nome_del_file_finisce_nel_messaggio_di_errore(tmp_path):
     path = tmp_path / "rotto.srt"
     path.write_text("1\n00:00:0X,000 --> 00:00:02,000\nCiao\n")
-    with pytest.raises(SubtitleError, match="rotto.srt"):
+    with pytest.raises(SubtitleError, match=r"rotto\.srt"):
         load_srt(path)
 
 
@@ -157,7 +157,7 @@ def test_le_battute_oltre_la_fine_del_video_vengono_scartate(tmp_path):
 def test_il_file_srt_mancante_e_segnalato_prima_del_render(tmp_path):
     project = progetto_con_sottotitoli(tmp_path)
     project.subtitles.src = "non-esiste.srt"
-    with pytest.raises(ConfigError, match="non-esiste.srt"):
+    with pytest.raises(ConfigError, match=r"non-esiste\.srt"):
         project.validate_files()
 
 

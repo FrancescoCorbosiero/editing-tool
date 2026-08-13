@@ -17,8 +17,8 @@ import yaml
 # transitions.py e motion.py sono registry senza dipendenze pesanti: importarli
 # qui non viola il confine "models non conosce MoviePy" (vedi i loro docstring).
 from .motion import names as motion_names
-from .transitions import DIRECTIONS, TransitionRequest, names as transition_names
-from .transitions import normalize_direction
+from .transitions import DIRECTIONS, TransitionRequest, normalize_direction
+from .transitions import names as transition_names
 
 # Movimento massimo accettato: oltre il 200% quasi certamente e' un errore di
 # battitura (amount: 20 invece di 0.20), e il render diventerebbe lentissimo.
@@ -46,19 +46,19 @@ def _scale_position(position: Any, factor: float) -> Any:
     """Riscala una posizione, lasciando stare le parole ('center', 'top'...)."""
     if isinstance(position, (list, tuple)):
         return tuple(
-            int(round(p * factor)) if isinstance(p, (int, float)) else p
+            round(p * factor) if isinstance(p, (int, float)) else p
             for p in position
         )
     if isinstance(position, (int, float)):
-        return int(round(position * factor))
+        return round(position * factor)
     return position
 
 
-def _scale_style(style: "TextStyle", factor: float) -> None:
+def _scale_style(style: TextStyle, factor: float) -> None:
     """Riscala corpo, contorno e riempimento di uno stile di testo."""
-    style.font_size = max(1, int(round(style.font_size * factor)))
-    style.padding = int(round(style.padding * factor))
-    style.stroke_width = int(round(style.stroke_width * factor))
+    style.font_size = max(1, round(style.font_size * factor))
+    style.padding = round(style.padding * factor)
+    style.stroke_width = round(style.stroke_width * factor)
     # max_width <= 1 e' una frazione del canvas: si riscala da sola.
     if style.max_width is not None and style.max_width > 1:
         style.max_width = max(1.0, round(style.max_width * factor))
@@ -149,7 +149,7 @@ class OutputSpec:
     threads: int | None = None
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> "OutputSpec":
+    def from_dict(cls, data: dict | None) -> OutputSpec:
         data = data or {}
         spec = cls()
         if "path" in data:
@@ -181,7 +181,7 @@ class Defaults:
     fit: str = "cover"
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> "Defaults":
+    def from_dict(cls, data: dict | None) -> Defaults:
         data = data or {}
         d = cls()
         if "transition" in data:
@@ -223,7 +223,7 @@ class Segment:
     label: str = ""                # solo per leggibilita' nei log
 
     @classmethod
-    def from_dict(cls, data: dict, index: int) -> "Segment":
+    def from_dict(cls, data: dict, index: int) -> Segment:
         where = f"timeline[{index}]"
         seg_type = str(_require(data, "type", where)).lower()
         if seg_type not in ("video", "image", "color"):
@@ -285,7 +285,7 @@ class Segment:
         return seg
 
     def timeline_duration(
-        self, defaults: "Defaults", source_duration: float | None = None
+        self, defaults: Defaults, source_duration: float | None = None
     ) -> float | None:
         """
         Quanti secondi occupa questo segmento nella timeline.
@@ -304,7 +304,7 @@ class Segment:
             return None
         return max(end - start, 0.0) / self.speed
 
-    def transition_request(self, defaults: "Defaults") -> TransitionRequest:
+    def transition_request(self, defaults: Defaults) -> TransitionRequest:
         """
         Come questo segmento entra in scena: durata, tipo, direzione.
 
@@ -349,7 +349,7 @@ class TextStyle:
     padding: int = 0               # spazio fra testo e bordo dello sfondo, in pixel
 
     @classmethod
-    def from_dict(cls, data: dict, where: str, **overrides: Any) -> "TextStyle":
+    def from_dict(cls, data: dict, where: str, **overrides: Any) -> TextStyle:
         style = cls(**overrides)
         for key in ("font_size", "stroke_width", "padding"):
             if data.get(key) is not None:
@@ -388,7 +388,7 @@ class TextStyle:
         if self.max_width is None:
             return None
         if self.max_width <= 1.0:
-            return max(1, int(round(canvas_width * self.max_width)))
+            return max(1, round(canvas_width * self.max_width))
         return int(self.max_width)
 
 
@@ -413,7 +413,7 @@ class Overlay:
     style: TextStyle = field(default_factory=TextStyle)
 
     @classmethod
-    def from_dict(cls, data: dict, index: int) -> "Overlay":
+    def from_dict(cls, data: dict, index: int) -> Overlay:
         where = f"overlays[{index}]"
         ov_type = str(_require(data, "type", where)).lower()
         if ov_type not in ("image", "text"):
@@ -456,7 +456,7 @@ class SubtitlesSpec:
     offset: float = 0.0            # sposta tutti i tempi: per rimettere in sync un srt
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> "SubtitlesSpec | None":
+    def from_dict(cls, data: dict | None) -> SubtitlesSpec | None:
         if not data:
             return None
         where = "subtitles"
@@ -487,7 +487,7 @@ class AudioSpec:
     replace: bool = False   # True = sostituisce l'audio originale dei segmenti
 
     @classmethod
-    def from_dict(cls, data: dict | None) -> "AudioSpec | None":
+    def from_dict(cls, data: dict | None) -> AudioSpec | None:
         if not data:
             return None
         spec = cls(src=Path(_require(data, "src", "audio")))
@@ -511,7 +511,7 @@ class Project:
     root: Path = Path(".")   # i percorsi relativi si risolvono da qui
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "Project":
+    def from_yaml(cls, path: str | Path) -> Project:
         path = Path(path)
         if not path.exists():
             raise ConfigError(f"File di progetto non trovato: {path}")
@@ -523,7 +523,7 @@ class Project:
         return project
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Project":
+    def from_dict(cls, data: dict) -> Project:
         if not isinstance(data, dict):
             raise ConfigError("Il file di progetto deve contenere una mappa YAML")
 
@@ -574,7 +574,7 @@ class Project:
         sono gia' relative al canvas, ed e' il motivo per cui conviene usarle.
         """
         def px(value: float) -> int:
-            return max(1, int(round(value * factor)))
+            return max(1, round(value * factor))
 
         self.output.size = (_even_down(self.output.size[0] * factor),
                             _even_down(self.output.size[1] * factor))

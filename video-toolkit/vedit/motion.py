@@ -96,7 +96,7 @@ def even_up(value: float) -> int:
     all'altro - si vede come un tremolio. Arrotondando per eccesso si evita anche
     di scendere sotto le dimensioni del canvas, cioe' di scoprire i bordi.
     """
-    ceiling = int(math.ceil(value - 1e-9))
+    ceiling = math.ceil(value - 1e-9)
     return ceiling + (ceiling % 2)
 
 
@@ -184,9 +184,9 @@ def _pan(clip, ctx: MotionContext, horizontal: bool, forward: bool):
         progress = _ramp(t, duration)
         offset = progress if forward else 1.0 - progress
         if horizontal:
-            x, y = int(round(travel_x * offset)), travel_y // 2
+            x, y = round(travel_x * offset), travel_y // 2
         else:
-            x, y = travel_x // 2, int(round(travel_y * offset))
+            x, y = travel_x // 2, round(travel_y * offset)
         return enlarged[y:y + canvas_h, x:x + canvas_w]
 
     # VideoClip ricava le dimensioni dal primo fotogramma: sono quelle del

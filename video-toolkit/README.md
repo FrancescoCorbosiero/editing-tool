@@ -38,14 +38,24 @@ Verifica con `ffmpeg -version`.
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -e ".[dev]"          # installa vedit + pytest e ruff
 ```
+
+`-e` (*editable*) installa il progetto **collegandolo** alla cartella invece di
+copiarlo: le modifiche al codice sono attive subito, senza reinstallare. `[dev]`
+aggiunge gli strumenti di sviluppo; senza, ottieni solo quello che serve per
+renderizzare. In alternativa `pip install -r requirements.txt` installa le sole
+dipendenze, ma non ti dà il comando `vedit`.
 
 **3. Prova**:
 
 ```bash
-python -m vedit render projects/demo/timeline.yaml --dry-run
+vedit render projects/demo/timeline.yaml --dry-run
 ```
+
+Dopo `pip install -e .` il comando si chiama **`vedit`**. Se preferisci non
+installare niente, `python -m vedit ...` funziona lo stesso da dentro questa
+cartella: in questo README i due sono intercambiabili.
 
 Il `--dry-run` costruisce la timeline e valida il file senza esportare nulla: è il modo
 più rapido per scoprire un errore di configurazione.
@@ -149,6 +159,7 @@ vedit/
   cli.py           Interfaccia da riga di comando.
 projects/demo/     Progetto di esempio, documentato campo per campo.
 examples/          Script didattici progressivi (leggili in ordine).
+docs/GLOSSARIO.md  I termini di montaggio, spiegati per programmatori.
 assets/            I tuoi file sorgente. Ignorato da git.
 output/            I render. Ignorato da git.
 tests/             Test rapidi che non richiedono file video.
@@ -553,14 +564,34 @@ esatto usa `accurate_cut`.
 
 ---
 
-## Test
+## Test e qualità
 
 ```bash
-pytest -q
+pytest -q          # i test
+ruff check .       # il lint
 ```
 
-I test coprono parsing, validazione e matematica delle transizioni usando segmenti
-`color` generati in memoria — nessun file video richiesto, girano in meno di un secondo.
+I test coprono parsing, validazione, matematica delle transizioni, movimento,
+sottotitoli e stile del testo usando segmenti `color` e immagini generate in
+memoria: **nessun file video nel repo**. I pochi test che hanno bisogno di un
+sorgente vero (i proxy) se lo generano con ffmpeg in una cartella temporanea, e
+si saltano da soli se ffmpeg non c'è.
+
+Un test merita una nota: `tests/test_confini.py` importa i moduli "leggeri" in un
+interprete separato e verifica che **non** si siano tirati dietro MoviePy. È il
+confine architetturale del progetto reso eseguibile — senza, prima o poi qualcuno
+aggiunge un `import` in cima al file sbagliato e `--check` inizia a costarci
+secondi invece di millisecondi.
+
+`ruff check` deve passare. `ruff format` è configurato ma **non** obbligatorio:
+i commenti allineati in colonna sui campi delle dataclass si leggono come una
+tabella, e il formatter li schiaccerebbe. Il perché è scritto nel `pyproject.toml`.
+
+Su ogni push, una GitHub Action (`.github/workflows/ci.yml`) installa ffmpeg,
+lancia lint e test su Python 3.10 e 3.12, genera il materiale di prova con ffmpeg
+e renderizza davvero il progetto demo, controllando durata, dimensioni e che i
+fotogrammi non siano neri. Un export può uscire con codice 0 e produrre un video
+sbagliato: la CI lo verifica come lo verificheresti tu.
 
 ---
 
@@ -579,6 +610,8 @@ Poi apri `builder.py`: a quel punto lo leggerai senza fatica.
 
 ## Riferimenti
 
+- [`docs/GLOSSARIO.md`](docs/GLOSSARIO.md) — i termini di montaggio usati qui,
+  spiegati per chi viene dalla programmazione
 - [Documentazione MoviePy 2.x](https://zulko.github.io/moviepy/)
 - [Guida alla migrazione 1.x → 2.x](https://zulko.github.io/moviepy/getting_started/updating_to_v2.html)
 - [Filtri FFmpeg](https://ffmpeg.org/ffmpeg-filters.html)

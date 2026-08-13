@@ -1,3 +1,9 @@
+# Le stesse dipendenze sono dichiarate in pyproject.toml, che e' la fonte
+# autorevole. Questo file resta per chi preferisce il giro classico
+#     pip install -r requirements.txt
+# invece di
+#     pip install -e ".[dev]"     <- consigliato: aggiunge il comando `vedit`
+
 # MoviePy 2.x: l'API e' incompatibile con la 1.x, non abbassare la versione
 moviepy>=2.1.1
 PyYAML>=6.0
@@ -6,3 +12,4 @@ Pillow>=10.0
 
 # Sviluppo (opzionali)
 pytest>=8.0
+ruff>=0.6

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import IO
+from typing import IO, ClassVar
 
 from proglog import ProgressBarLogger
 
@@ -54,7 +54,9 @@ class RenderProgress(ProgressBarLogger):
     """
 
     # `t` e' il nome usato dalle versioni piu' vecchie di MoviePy 2.x.
-    LABELS = {"frame_index": "video", "t": "video", "chunk": "audio"}
+    LABELS: ClassVar[dict[str, str]] = {
+        "frame_index": "video", "t": "video", "chunk": "audio",
+    }
 
     def __init__(
         self,
@@ -109,7 +111,7 @@ class RenderProgress(ProgressBarLogger):
     # -- disegno ----------------------------------------------------------
 
     def _line(self, bar: str, fraction: float, elapsed: float, eta: float | None) -> str:
-        filled = int(round(fraction * self.width))
+        filled = round(fraction * self.width)
         gauge = self.full * filled + self.empty * (self.width - filled)
         label = self.LABELS.get(bar, bar)
         text = f"  {label:<5} [{gauge}] {fraction * 100:3.0f}%  {format_duration(elapsed)}"

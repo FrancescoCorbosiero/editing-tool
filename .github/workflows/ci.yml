@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Il progetto vive in una sottocartella del repo.
+        working-directory: video-toolkit
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # La versione minima dichiarata in pyproject e una recente: se il codice
+        # usa per sbaglio una novita' di Python, il primo lavoro fallisce.
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepara Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Installa FFmpeg
+        # Non e' un pacchetto pip: e' un binario di sistema, e senza di lui
+        # meta' dei test si salterebbe in silenzio.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+
+      - name: Installa il progetto
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        # `python -m` invece del comando nudo: garantisce lo stesso interprete
+        # in cui abbiamo appena installato, qualunque cosa ci sia nel PATH.
+        run: python -m ruff check .
+
+      - name: Test
+        run: python -m pytest -q
+
+      - name: Genera il materiale di prova
+        # Gli stessi comandi documentati in assets/README.md: se cambiano e
+        # smettono di funzionare, la CI se ne accorge.
+        run: |
+          ffmpeg -v error -f lavfi -i testsrc=size=1280x720:rate=30:duration=60 \
+                 -f lavfi -i sine=frequency=440:duration=60 \
+                 -c:v libx264 -pix_fmt yuv420p -c:a aac assets/input.mp4
+          ffmpeg -v error -f lavfi -i testsrc=size=1080x1350 -frames:v 1 assets/foto1.jpg
+          ffmpeg -v error -f lavfi -i color=c=blue@0.8:size=400x120,format=rgba \
+                 -frames:v 1 assets/logo.png
+
+      - name: Riepilogo del progetto demo
+        # Usa il comando `vedit` invece di `python -m vedit`: cosi' si verifica
+        # anche che l'entry point dichiarato in pyproject funzioni davvero.
+        run: vedit render projects/demo/timeline.yaml --check
+
+      - name: Anteprima del progetto demo
+        run: vedit render projects/demo/timeline.yaml --preview
+
+      - name: Verifica il file prodotto
+        # Un export puo' uscire con codice 0 e produrre un video sbagliato:
+        # si controllano durata, dimensioni e che i fotogrammi non siano neri.
+        run: |
+          python - <<'PY'
+          from moviepy import VideoFileClip
+
+          clip = VideoFileClip("output/demo_preview.mp4")
+          try:
+              assert abs(clip.duration - 17.3) < 0.2, f"durata inattesa: {clip.duration}"
+              assert tuple(clip.size) == (960, 540), f"dimensioni inattese: {clip.size}"
+              luminosita = clip.get_frame(5.0).mean()
+              assert luminosita > 5, f"fotogramma nero a 5s: {luminosita}"
+              print(f"OK: {clip.duration}s, {clip.size}, luminosita' media {luminosita:.1f}")
+          finally:
+              clip.close()
+          PY
