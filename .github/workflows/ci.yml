@@ -1,8 +1,18 @@
 name: CI
 
 on:
+  # Sui rami di lavoro basta l'evento della pull request: con `push:` senza
+  # filtro ogni commit su un ramo con PR aperta faceva partire due volte la
+  # stessa matrice, cioe' quattro job identici invece di due.
   push:
+    branches: [main]
   pull_request:
+
+# Un push che ne supera un altro sullo stesso ramo annulla la corsa precedente:
+# aspettare l'esito di un commit gia' sostituito non serve a nessuno.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
