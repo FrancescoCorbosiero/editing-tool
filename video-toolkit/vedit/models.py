@@ -18,7 +18,13 @@ import yaml
 # qui non viola il confine "models non conosce MoviePy" (vedi i loro docstring).
 from .motion import names as motion_names
 from .transitions import DIRECTIONS, TransitionRequest, normalize_direction
+from .transitions import get as get_transition
 from .transitions import names as transition_names
+
+
+def transition_overlaps(name: str) -> bool:
+    """True se quella transizione fa coesistere i due clip nel tempo."""
+    return get_transition(name).overlaps
 
 # Movimento massimo accettato: oltre il 200% quasi certamente e' un errore di
 # battitura (amount: 20 invece di 0.20), e il render diventerebbe lentissimo.
@@ -211,6 +217,7 @@ class Segment:
     start: float | None = None     # solo per type=video: taglio IN nel sorgente
     end: float | None = None       # solo per type=video: taglio OUT nel sorgente
     duration: float | None = None  # obbligatorio per image/color
+    at: float | None = None        # istante sul MONTAGGIO in cui entra in scena
     fit: str | None = None
     transition: float | None = None       # durata della transizione in ENTRATA
     transition_type: str | None = None    # vedi vedit/transitions.py
@@ -234,9 +241,12 @@ class Segment:
         if seg_type in ("video", "image"):
             seg.src = Path(_require(data, "src", where))
 
-        for key in ("start", "end", "duration", "transition"):
+        for key in ("start", "end", "duration", "transition", "at"):
             if data.get(key) is not None:
                 setattr(seg, key, float(data[key]))
+
+        if seg.at is not None and seg.at < 0:
+            raise ConfigError(f"{where}: at non puo' essere negativo")
 
         if "speed" in data:
             seg.speed = float(data["speed"])
@@ -279,7 +289,9 @@ class Segment:
             if seg.end <= seg.start:
                 raise ConfigError(f"{where}: end deve essere maggiore di start")
 
-        if seg_type == "color" and seg.duration is None:
+        # `at` rende la durata deducibile - la chiude il taglio successivo -
+        # quindi qui si pretende solo quando il montaggio va a durate.
+        if seg_type == "color" and seg.duration is None and seg.at is None:
             raise ConfigError(f"{where}: un segmento 'color' richiede 'duration'")
 
         return seg
@@ -560,6 +572,84 @@ class Project:
         """Trasforma un percorso del YAML in percorso assoluto."""
         p = Path(path)
         return p if p.is_absolute() else (self.root / p).resolve()
+
+    # ----------------------------------------------------------------------
+    # Montaggio a istanti dichiarati (`at`)
+    # ----------------------------------------------------------------------
+
+    def cut_positions(self) -> list[float] | None:
+        """
+        Gli istanti in cui cambia la scena, se il progetto li dichiara con `at`.
+
+        Due modi di scrivere un montaggio, e questo sceglie quale si sta usando:
+
+        - **a durate**: ogni segmento dice quanto dura, e la sua posizione e' la
+          somma di quelli prima. Comodo per un racconto, pessimo per la musica:
+          allungare il terzo spezzone di un decimo sposta di un decimo TUTTI i
+          tagli successivi, che erano a tempo e non lo sono piu'.
+
+        - **a istanti** (`at`): ogni segmento dichiara il momento in cui entra.
+          Spostare un taglio muove quel taglio e basta. Le durate si ricavano da
+          sole: un segmento finisce quando comincia il successivo.
+
+        Restituisce None se il progetto usa le durate.
+        """
+        declared = [seg.at for seg in self.timeline]
+        if all(value is None for value in declared):
+            return None
+        return [value if value is not None else 0.0 for value in declared]
+
+    def validate_positions(self) -> None:
+        """Controlla che gli istanti dichiarati abbiano senso."""
+        declared = [seg.at for seg in self.timeline]
+        if all(value is None for value in declared):
+            return
+
+        errors: list[str] = []
+        for i, value in enumerate(declared):
+            if value is None:
+                errors.append(
+                    f"timeline[{i}]: manca 'at'. In un montaggio a istanti devono "
+                    "averlo tutti i segmenti, altrimenti meta' timeline si "
+                    "posiziona da sola e meta' no"
+                )
+        _raise_all(errors, "Il progetto mescola durate e istanti")
+
+        if declared[0] != 0:
+            raise ConfigError(
+                f"timeline[0]: il primo segmento deve avere at: 0 (trovato {declared[0]:g}). "
+                "Il montaggio comincia dal primo segmento, non dal nero"
+            )
+        for i in range(1, len(declared)):
+            if declared[i] <= declared[i - 1]:
+                raise ConfigError(
+                    f"timeline[{i}]: at {declared[i]:g} non viene dopo "
+                    f"timeline[{i - 1}] (at {declared[i - 1]:g}). Gli istanti "
+                    "devono crescere: sono momenti sulla stessa linea del tempo"
+                )
+
+        # L'ultimo segmento e' l'unico senza un taglio dopo di se' che lo chiuda:
+        # deve sapere da solo dove finisce.
+        last = self.timeline[-1]
+        if last.timeline_duration(self.defaults) is None:
+            raise ConfigError(
+                f"timeline[{len(self.timeline) - 1}]: l'ultimo segmento deve dire dove "
+                "finisce ('end' nel sorgente, oppure 'duration'). Tutti gli altri li "
+                "chiude il taglio successivo, lui no"
+            )
+
+        # Le transizioni che sovrappongono i clip sposterebbero i clip nel tempo,
+        # cioe' proprio la cosa che `at` serve a fissare.
+        for i, seg in enumerate(self.timeline):
+            if i == 0:
+                continue
+            request = seg.transition_request(self.defaults)
+            if request.duration > 0 and transition_overlaps(request.type):
+                raise ConfigError(
+                    f"timeline[{i}]: la transizione '{request.type}' sovrappone i clip "
+                    "e non si combina con 'at', che fissa gli istanti. Usa "
+                    "transition_type: cut oppure fade_through_black, che non spostano niente"
+                )
 
     def scale(self, factor: float) -> None:
         """

@@ -36,7 +36,7 @@ from .motion import MotionContext
 from .progress import RenderProgress, format_duration
 from .proxies import find_proxy
 from .subtitles import load_srt
-from .timeline import clamp_overlap, plan, total_duration
+from .timeline import clamp_overlap, durations_from_positions, plan, total_duration
 from .transitions import TransitionContext, TransitionRequest
 
 log = logging.getLogger("vedit")
@@ -125,8 +125,15 @@ def source_path(seg: Segment, project: Project, use_proxy: bool) -> Path:
     return proxy
 
 
-def build_segment(seg: Segment, project: Project, use_proxy: bool = False):
-    """Trasforma un Segment del YAML in un clip MoviePy pronto per il montaggio."""
+def build_segment(seg: Segment, project: Project, use_proxy: bool = False,
+                  target: float | None = None):
+    """
+    Trasforma un Segment del YAML in un clip MoviePy pronto per il montaggio.
+
+    `target` e' la durata che il segmento deve avere sul montaggio: la passa il
+    chiamante quando il progetto dichiara gli istanti con `at`, perche' in quel
+    caso la durata non sta nel segmento - viene da quando entra il successivo.
+    """
     size = project.output.size
     fit_mode = seg.fit or project.defaults.fit
 
@@ -137,7 +144,13 @@ def build_segment(seg: Segment, project: Project, use_proxy: bool = False):
         clip = VideoFileClip(str(path))
         _OPEN_CLIPS.append(clip)
 
-        if seg.start is not None or seg.end is not None:
+        if target is not None and seg.end is None:
+            # Si prende dal sorgente esattamente quanto serve. A velocita'
+            # diversa da 1 ne serve di piu' (o di meno): due secondi di
+            # montaggio a 2x mangiano quattro secondi di girato.
+            source_start = seg.start or 0
+            clip = clip.subclipped(source_start, source_start + target * seg.speed)
+        elif seg.start is not None or seg.end is not None:
             clip = clip.subclipped(seg.start or 0, seg.end)
 
         if seg.speed != 1.0:
@@ -150,7 +163,7 @@ def build_segment(seg: Segment, project: Project, use_proxy: bool = False):
         path = project.resolve(seg.src)
         if not path.exists():
             raise FileNotFoundError(f"Immagine non trovata: {path}")
-        duration = seg.duration or project.defaults.image_duration
+        duration = target or seg.duration or project.defaults.image_duration
         clip = ImageClip(str(path)).with_duration(duration)
 
         if seg.motion:
@@ -161,7 +174,7 @@ def build_segment(seg: Segment, project: Project, use_proxy: bool = False):
             return motion.get(seg.motion).apply(clip, ctx)
 
     elif seg.type == "color":
-        clip = ColorClip(size=size, color=seg.color, duration=seg.duration)
+        clip = ColorClip(size=size, color=seg.color, duration=target or seg.duration)
 
     else:  # pragma: no cover - gia' validato in models.py
         raise ValueError(f"Tipo di segmento sconosciuto: {seg.type}")
@@ -414,11 +427,24 @@ def build(project: Project, use_proxy: bool = False):
     """Costruisce il clip finale, pronto per write_videofile()."""
     size = project.output.size
 
+    # Se il progetto dichiara gli istanti (`at`), le durate si ricavano da quelli:
+    # ogni segmento finisce quando comincia il successivo.
+    project.validate_positions()
+    positions = project.cut_positions()
+    targets: list[float | None] = [None] * len(project.timeline)
+    if positions is not None:
+        ultimo = project.timeline[-1]
+        coda = ultimo.timeline_duration(project.defaults)
+        if coda is None:
+            coda = (ultimo.end or 0) - (ultimo.start or 0)
+        targets = durations_from_positions(positions, coda)
+        log.info("Montaggio a istanti: %d tagli dichiarati", len(positions))
+
     log.info("Costruzione di %d segmenti...", len(project.timeline))
     clips = []
     requests = []
     for i, seg in enumerate(project.timeline):
-        clips.append(build_segment(seg, project, use_proxy))
+        clips.append(build_segment(seg, project, use_proxy, target=targets[i]))
         # La transizione dichiarata sul segmento vince sul default globale
         requests.append(seg.transition_request(project.defaults))
         log.info("  [%d] %s %s (%.2fs)", i, seg.type, seg.label or seg.src or "",
