@@ -58,6 +58,9 @@ più rapido per scoprire un errore di configurazione.
 # Metadati di un file (durata, risoluzione, fps, codec)
 python -m vedit probe assets/riprese.mp4
 
+# Font utilizzabili per testo e sottotitoli su questa macchina
+python -m vedit fonts
+
 # Riepilogo della timeline: cosa cade dove, e cosa non torna
 python -m vedit render projects/demo/timeline.yaml --check
 
@@ -73,6 +76,10 @@ python -m vedit init projects/mio-video
 
 **Lavora sempre con `--preview` mentre monti.** L'export a piena risoluzione può
 richiedere minuti; l'anteprima secondi. Togli il flag solo quando il montaggio ti convince.
+
+L'anteprima riscala **tutto** il progetto, non solo il canvas: posizioni degli
+overlay, corpo del testo, margini dei sottotitoli. Quello che vedi a metà
+risoluzione è quello che otterrai a piena risoluzione, in miniatura.
 
 ---
 
@@ -128,6 +135,8 @@ vedit/
   timeline.py      Dove inizia e finisce ogni segmento. Matematica pura, niente MoviePy.
   transitions.py   Registry delle transizioni: aggiungerne una è un file solo.
   motion.py        Registry dei movimenti sulle immagini (Ken Burns).
+  subtitles.py     Lettura dei file .srt. Solo testo, nessuna dipendenza.
+  fonts.py         Trova un font utilizzabile e manda a capo il testo.
   report.py        Il riepilogo di --check. Legge i metadati con ffprobe.
   builder.py       Traduce il progetto in clip MoviePy. È qui che vive la logica di montaggio.
   progress.py      La barra di avanzamento dell'export.
@@ -185,10 +194,36 @@ deve rispondere subito.
 
 ### `overlays` — sovrapposti a tutto
 
-`type` (`image` | `text`), `src`/`text`, `start`, `duration`, `width`/`height`,
-`position` (`[x, y]` in pixel oppure `"center"` / `["center", "top"]`),
-`fade`, `opacity`. Per il testo servono anche `font` (percorso a un `.ttf`),
-`font_size`, `color`.
+| Campo | Si applica a | Note |
+|---|---|---|
+| `type` | — | `image` \| `text` |
+| `src` / `text` | image / text | il file oppure la scritta |
+| `start`, `duration` | tutti | `duration` assente = fino alla fine del video |
+| `width`, `height` | image | uno solo dei due mantiene le proporzioni |
+| `position` | tutti | `[x, y]` in pixel, oppure `"center"` / `["center", "top"]` |
+| `fade`, `opacity` | tutti | dissolvenza in entrata/uscita e trasparenza |
+
+I campi di **stile del testo** valgono sia qui sia nei sottotitoli:
+
+| Campo | Default (overlay) | Note |
+|---|---|---|
+| `font` | primo font di sistema | percorso a un `.ttf`/`.otf` **oppure** nome di un font installato |
+| `font_size` | `64` | |
+| `color` | `white` | nome o `#rrggbb` |
+| `stroke_color`, `stroke_width` | nessuno | contorno: la difesa più economica contro uno sfondo mosso |
+| `bg_color`, `bg_opacity` | nessuno, `0.6` | riquadro dietro il testo; `bg_color` è un nome o `[R,G,B]` |
+| `max_width` | nessuno | `≤ 1` = frazione del canvas, `> 1` = pixel. Attiva l'a capo automatico |
+| `align` | `center` | `left` \| `center` \| `right` |
+| `padding` | `0` | spazio fra testo e bordo del riquadro |
+
+### `subtitles` — un file `.srt` sopra tutto il montaggio
+
+| Campo | Default | Note |
+|---|---|---|
+| `src` | — | percorso del `.srt` |
+| `margin_bottom` | `60` | distanza dal bordo inferiore, in pixel |
+| `offset` | `0` | sposta **tutti** i tempi: per rimettere in sincrono un srt sfasato |
+| stile | `font_size: 48`, bianco con contorno nero, `max_width: 0.8`, `padding: 8` | vedi la tabella sopra |
 
 ### `audio` — traccia aggiuntiva
 
@@ -262,6 +297,91 @@ Le regole del contratto:
 - `directional=True` se usi `ctx.direction`;
 - **importa MoviePy dentro la funzione**, non in cima al file: `models.py` importa
   questo modulo per validare i nomi e non deve trascinarsi dietro MoviePy.
+
+---
+
+## Testo e sottotitoli
+
+### Il font: il problema numero uno
+
+MoviePy disegna il testo con Pillow, che vuole il **percorso di un file** `.ttf`
+o `.otf`. Non conosce i nomi dei font installati come farebbe un word processor,
+e se non gli si dice niente ripiega su un font interno minimale — quando non
+fallisce del tutto. È la ragione per cui in rete si trovano decine di
+segnalazioni di «TextClip non funziona».
+
+`vedit` accetta tre modi di indicarlo, in ordine di precedenza:
+
+```yaml
+font: ../../assets/fonts/Inter-Bold.ttf   # 1. percorso, relativo al file YAML
+font: DejaVu Sans                          # 2. nome di un font installato
+# (niente)                                 # 3. un font di sistema scelto da vedit
+```
+
+```bash
+python -m vedit fonts     # cosa c'è su questa macchina, e quale verrebbe usato
+```
+
+**Nel repo non c'è nessun font**, di proposito: sono file binari, con licenze
+proprie da rispettare e ridistribuire, e ogni sistema operativo ne ha già di
+ottimi installati. Se ti serve un font specifico — perché il video deve essere
+coerente con un'identità visiva — mettilo in `assets/fonts/` e indicane il
+percorso: quella cartella è ignorata da git, come tutti i media.
+
+### Rendere il testo leggibile
+
+Il testo su video ha un solo problema: ci finisce sopra qualsiasi cosa. Le tre
+difese, in ordine di efficacia:
+
+```yaml
+overlays:
+  - type: text
+    text: "Il mio primo montaggio"
+    stroke_color: black      # 1. contorno: costa niente, funziona quasi sempre
+    stroke_width: 2
+    bg_color: black          # 2. riquadro semitrasparente: l'unico che regge
+    bg_opacity: 0.45         #    su uno sfondo molto mosso
+    padding: 14              #    (dà respiro fra lettere e bordo del riquadro)
+    font_size: 72            # 3. corpo grande: aiuta, ma non basta da solo
+    max_width: 0.7           # va a capo da solo entro il 70% del canvas
+    align: center
+    position: ["center", 820]
+```
+
+`max_width` attiva **l'a capo automatico alle parole**. Il riquadro di sfondo
+resta largo quanto la riga più lunga: un testo corto non si porta dietro un
+rettangolo mezzo vuoto.
+
+### Sottotitoli da file `.srt`
+
+```yaml
+subtitles:
+  src: ../../assets/dialoghi.srt
+  font_size: 42
+  stroke_color: black
+  stroke_width: 2
+  max_width: 0.8            # 80% del canvas
+  margin_bottom: 70         # distanza dal bordo inferiore
+  offset: -0.5              # tutto mezzo secondo prima: sistema un srt sfasato
+```
+
+Un `.srt` è testo semplice, a blocchi separati da una riga vuota:
+
+```
+1
+00:00:01,000 --> 00:00:04,200
+Prima battuta,
+anche su due righe
+```
+
+Il numero progressivo serve solo agli umani, `vedit` lo ignora. Vengono accettati
+i ritorni a capo di Windows, il BOM del Blocco Note, il punto al posto della
+virgola nei millisecondi e i file salvati in latin-1. Ogni battuta diventa un clip
+di testo indipendente, posizionato **dal basso**: un sottotitolo su due righe è
+più alto, e ancorandolo in alto la seconda riga finirebbe fuori dal quadro.
+
+`--check` conta le battute e avvisa su quelle che si sovrappongono nel tempo, che
+durano meno di mezzo secondo (illeggibili) o che iniziano dopo la fine del montaggio.
 
 ---
 

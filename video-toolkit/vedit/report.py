@@ -54,6 +54,7 @@ class Report:
     fps: int
     rows: list[SegmentRow] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    subtitle_count: int = 0
 
     @property
     def duration(self) -> float:
@@ -176,7 +177,51 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
 
     _check_sources_consistency(report, project, cache, kinds)
     _check_audio(report, project, cache)
+    _check_subtitles(report, project)
     return report
+
+
+def _check_subtitles(report: Report, project: Project) -> None:
+    """Legge l'srt e segnala i problemi che si vedrebbero solo a render finito."""
+    if project.subtitles is None:
+        return
+
+    from .subtitles import SubtitleError, load_srt, overlaps
+
+    spec = project.subtitles
+    try:
+        cues = load_srt(project.resolve(spec.src))
+    except SubtitleError as exc:
+        report.warnings.append(f"sottotitoli: {exc}")
+        return
+
+    if not cues:
+        report.warnings.append("sottotitoli: il file non contiene nessuna battuta")
+        return
+
+    report.subtitle_count = len(cues)
+
+    fuori = [c for c in cues if c.start + spec.offset >= report.duration]
+    if fuori:
+        report.warnings.append(
+            f"sottotitoli: {len(fuori)} battute iniziano dopo la fine del montaggio "
+            f"({report.duration:.2f}s) e non si vedranno"
+        )
+
+    sovrapposte = overlaps(cues)
+    if sovrapposte:
+        primo = sovrapposte[0][0]
+        report.warnings.append(
+            f"sottotitoli: {len(sovrapposte)} coppie di battute si sovrappongono nel "
+            f"tempo (la prima a {primo.start:.2f}s): verranno disegnate una sull'altra"
+        )
+
+    lampo = [c for c in cues if c.duration < 0.5]
+    if lampo:
+        report.warnings.append(
+            f"sottotitoli: {len(lampo)} battute durano meno di mezzo secondo, "
+            "il tempo minimo per leggerle"
+        )
 
 
 def _check_cuts(report: Report, index: int, seg: Segment, info: dict | None) -> None:
@@ -296,6 +341,8 @@ def format_report(report: Report) -> str:
         f"Durata totale: {format_time(report.duration)}  ({report.duration:.2f}s, "
         f"{int(report.duration * report.fps)} fotogrammi)"
     )
+    if report.subtitle_count:
+        lines.append(f"Sottotitoli  : {report.subtitle_count} battute")
 
     if report.warnings:
         lines.append("")

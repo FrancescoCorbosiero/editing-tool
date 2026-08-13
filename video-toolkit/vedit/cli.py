@@ -85,6 +85,14 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fonts(args: argparse.Namespace) -> int:
+    """Elenca i font utilizzabili: senza un font il testo su video non si disegna."""
+    from .fonts import describe
+
+    print(describe())
+    return 0
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     target_dir = Path(args.directory)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -125,6 +133,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe.add_argument("path")
     p_probe.add_argument("--json", action="store_true")
     p_probe.set_defaults(func=cmd_probe)
+
+    p_fonts = sub.add_parser("fonts", help="elenca i font utilizzabili per testo e sottotitoli")
+    p_fonts.set_defaults(func=cmd_fonts)
 
     p_init = sub.add_parser("init", help="crea un nuovo progetto da template")
     p_init.add_argument("directory")

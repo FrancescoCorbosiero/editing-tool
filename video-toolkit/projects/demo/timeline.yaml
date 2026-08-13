@@ -78,16 +78,37 @@ overlays:
     fade: 0.5
     opacity: 0.9
 
-  # Gli overlay di testo richiedono un font: passa il percorso a un .ttf
-  # - type: text
-  #   text: "Il mio primo montaggio"
-  #   font: ../../assets/fonts/Inter-Bold.ttf
-  #   font_size: 72
-  #   color: white
-  #   start: 1.5
-  #   duration: 3
-  #   position: ["center", 820]
-  #   fade: 0.6
+  # Testo. Senza 'font' vedit usa il primo font di sistema che trova:
+  # `python -m vedit fonts` mostra quali sono disponibili qui.
+  - type: text
+    text: "Il mio primo montaggio"
+    start: 1.5
+    duration: 3.5
+    font_size: 72
+    color: white
+    stroke_color: black     # contorno: stacca le lettere da qualsiasi sfondo
+    stroke_width: 2
+    bg_color: [0, 0, 0]     # riquadro semitrasparente dietro il testo
+    bg_opacity: 0.4
+    padding: 18             # respiro fra le lettere e il bordo del riquadro
+    max_width: 0.7          # va a capo da solo entro il 70% della larghezza
+    align: center
+    position: ["center", 820]
+    fade: 0.6
+
+# ---------------------------------------------------------------------------
+# SOTTOTITOLI: un file .srt disegnato sopra tutto il montaggio.
+# I tempi stanno nell'srt, qui si decide solo l'aspetto e la posizione.
+# ---------------------------------------------------------------------------
+# subtitles:
+#   src: ../../assets/dialoghi.srt
+#   font_size: 42
+#   color: white
+#   stroke_color: black
+#   stroke_width: 2
+#   max_width: 0.8          # a capo automatico entro l'80% della larghezza
+#   margin_bottom: 70       # distanza dal bordo inferiore, in pixel
+#   offset: 0.0             # sposta tutti i tempi, per rimettere in sincrono un srt
 
 # ---------------------------------------------------------------------------
 # AUDIO: traccia aggiuntiva (musica o voce fuori campo)

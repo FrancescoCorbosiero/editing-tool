@@ -47,6 +47,8 @@ Senza MoviePy:
   importa questo modulo per validare i nomi. Non spostare quegli import in cima.
 - **`vedit/motion.py`** — registry dei movimenti sulle immagini (Ken Burns), stessa
   regola sugli import di `transitions.py`.
+- **`vedit/subtitles.py`** — parsing dei `.srt`. Solo manipolazione di testo.
+- **`vedit/fonts.py`** — ricerca dei font e a capo del testo (usa Pillow, non MoviePy).
 - **`vedit/report.py`** — il riepilogo di `render --check`. Legge i metadati con ffprobe.
 - **`vedit/ffmpeg_tools.py`** — subprocess verso ffmpeg/ffprobe. Nessun MoviePy.
 
@@ -119,5 +121,10 @@ segmenti; se salta di colpo, la sovrapposizione non sta funzionando.
   directory. Usa sempre `project.resolve(path)`.
 - Con `pix_fmt` diverso da `yuv420p` il video non si apre su molti player. È già
   forzato negli `ffmpeg_params`.
+- `TextClip` vuole il **percorso** di un file di font, non un nome. `fonts.py` risolve
+  percorsi, nomi installati e un default di sistema: passa sempre da lì.
+- Il `method="caption"` di MoviePy 2.1.x spezza **dentro** le parole quando il testo
+  occupa più di due righe (mescola indici assoluti e relativi in `__break_text`).
+  L'a capo lo calcola `fonts.wrap_text`: non tornare a `caption`.
 - Larghezze/altezze dispari fanno fallire libx264. Se aggiungi ridimensionamenti
   dinamici (zoom, Ken Burns), arrotonda a numeri pari.

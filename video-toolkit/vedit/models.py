@@ -36,6 +36,34 @@ def _looks_like_font_file(value: str) -> bool:
     return Path(value).suffix.lower() in FONT_SUFFIXES
 
 
+def _even_down(value: float) -> int:
+    """Arrotonda al pari inferiore: libx264 rifiuta le dimensioni dispari."""
+    n = int(value)
+    return max(2, n - n % 2)
+
+
+def _scale_position(position: Any, factor: float) -> Any:
+    """Riscala una posizione, lasciando stare le parole ('center', 'top'...)."""
+    if isinstance(position, (list, tuple)):
+        return tuple(
+            int(round(p * factor)) if isinstance(p, (int, float)) else p
+            for p in position
+        )
+    if isinstance(position, (int, float)):
+        return int(round(position * factor))
+    return position
+
+
+def _scale_style(style: "TextStyle", factor: float) -> None:
+    """Riscala corpo, contorno e riempimento di uno stile di testo."""
+    style.font_size = max(1, int(round(style.font_size * factor)))
+    style.padding = int(round(style.padding * factor))
+    style.stroke_width = int(round(style.stroke_width * factor))
+    # max_width <= 1 e' una frazione del canvas: si riscala da sola.
+    if style.max_width is not None and style.max_width > 1:
+        style.max_width = max(1.0, round(style.max_width * factor))
+
+
 def _validate_transition_type(value: Any, where: str) -> str:
     name = str(value).strip().lower()
     if name not in transition_names():
@@ -299,6 +327,72 @@ class Segment:
 
 
 @dataclass
+class TextStyle:
+    """
+    Aspetto di un testo su video, condiviso da overlay e sottotitoli.
+
+    I due mestieri sono lo stesso mestiere: rendere leggibile del testo sopra
+    un'immagine che non controlli. Le tre difese, in ordine di efficacia, sono
+    il contorno (`stroke`), lo sfondo semitrasparente (`bg_color` + `bg_opacity`)
+    e infine il corpo grande.
+    """
+
+    font: str | None = None        # percorso a un .ttf/.otf o nome di font installato
+    font_size: int = 48
+    color: str = "white"
+    stroke_color: str | None = None   # contorno: staccalo dallo sfondo
+    stroke_width: int = 0
+    bg_color: Any = None           # nome ("black") o [R, G, B]; None = nessuno sfondo
+    bg_opacity: float = 0.6        # 0 trasparente, 1 pieno
+    max_width: float | None = None  # <= 1 frazione del canvas, > 1 pixel
+    align: str = "center"          # allineamento delle righe: left | center | right
+    padding: int = 0               # spazio fra testo e bordo dello sfondo, in pixel
+
+    @classmethod
+    def from_dict(cls, data: dict, where: str, **overrides: Any) -> "TextStyle":
+        style = cls(**overrides)
+        for key in ("font_size", "stroke_width", "padding"):
+            if data.get(key) is not None:
+                setattr(style, key, int(data[key]))
+        for key in ("color", "stroke_color", "font"):
+            if data.get(key) is not None:
+                setattr(style, key, str(data[key]))
+        if data.get("bg_color") is not None:
+            style.bg_color = data["bg_color"]
+        if data.get("bg_opacity") is not None:
+            style.bg_opacity = float(data["bg_opacity"])
+        if data.get("max_width") is not None:
+            style.max_width = float(data["max_width"])
+        if data.get("align") is not None:
+            style.align = str(data["align"]).lower()
+
+        if style.align not in ("left", "center", "right"):
+            raise ConfigError(f"{where}: align deve essere left, center o right")
+        if not 0.0 <= style.bg_opacity <= 1.0:
+            raise ConfigError(f"{where}: bg_opacity deve stare fra 0 e 1")
+        if style.stroke_width < 0:
+            raise ConfigError(f"{where}: stroke_width non puo' essere negativo")
+        if style.max_width is not None and style.max_width <= 0:
+            raise ConfigError(f"{where}: max_width deve essere positivo")
+        return style
+
+    def wrap_width(self, canvas_width: int) -> int | None:
+        """
+        Larghezza massima in pixel entro cui mandare a capo il testo.
+
+        `max_width: 0.8` significa "l'80% del canvas" e resta valido se domani
+        esporti lo stesso progetto in un'altra risoluzione; `max_width: 900`
+        e' invece un numero di pixel. La soglia e' 1: nessuno vuole un testo
+        largo un pixel.
+        """
+        if self.max_width is None:
+            return None
+        if self.max_width <= 1.0:
+            return max(1, int(round(canvas_width * self.max_width)))
+        return int(self.max_width)
+
+
+@dataclass
 class Overlay:
     """
     Elemento sovrapposto al montaggio finale (logo, watermark, cartello...).
@@ -316,9 +410,7 @@ class Overlay:
     position: Any = "center"       # [x, y] oppure "center" / ["center", "top"]
     fade: float = 0.0              # dissolvenza in entrata e uscita
     opacity: float = 1.0
-    font_size: int = 64
-    color: str = "white"
-    font: str | None = None        # percorso a un .ttf
+    style: TextStyle = field(default_factory=TextStyle)
 
     @classmethod
     def from_dict(cls, data: dict, index: int) -> "Overlay":
@@ -332,22 +424,55 @@ class Overlay:
             ov.src = Path(_require(data, "src", where))
         else:
             ov.text = str(_require(data, "text", where))
+            # 64px e' un corpo da cartello a tutto schermo; i sottotitoli, che
+            # devono farsi dimenticare, partono piu' piccoli.
+            ov.style = TextStyle.from_dict(data, where, font_size=64)
 
         for key in ("start", "duration", "fade", "opacity"):
             if data.get(key) is not None:
                 setattr(ov, key, float(data[key]))
-        for key in ("width", "height", "font_size"):
+        for key in ("width", "height"):
             if data.get(key) is not None:
                 setattr(ov, key, int(data[key]))
         if "position" in data:
             pos = data["position"]
             ov.position = tuple(pos) if isinstance(pos, list) else pos
-        if "color" in data:
-            ov.color = str(data["color"])
-        if "font" in data:
-            ov.font = str(data["font"])
 
         return ov
+
+
+@dataclass
+class SubtitlesSpec:
+    """
+    Sottotitoli caricati da un file .srt e disegnati sopra tutto il montaggio.
+
+    A differenza degli overlay non si dichiarano uno per uno: tempi e testo
+    stanno nell'srt, qui si decide solo come appaiono e dove.
+    """
+
+    src: Path
+    style: TextStyle = field(default_factory=TextStyle)
+    margin_bottom: int = 60        # distanza dal bordo inferiore, in pixel
+    offset: float = 0.0            # sposta tutti i tempi: per rimettere in sync un srt
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "SubtitlesSpec | None":
+        if not data:
+            return None
+        where = "subtitles"
+        spec = cls(src=Path(_require(data, "src", where)))
+        # Valori di partenza pensati per essere leggibili su qualsiasi immagine:
+        # bianco con contorno nero, larghi al massimo l'80% del canvas.
+        spec.style = TextStyle.from_dict(
+            data, where,
+            font_size=48, color="white", stroke_color="black", stroke_width=2,
+            max_width=0.8, align="center", padding=8,
+        )
+        if data.get("margin_bottom") is not None:
+            spec.margin_bottom = int(data["margin_bottom"])
+        if data.get("offset") is not None:
+            spec.offset = float(data["offset"])
+        return spec
 
 
 @dataclass
@@ -382,6 +507,7 @@ class Project:
     timeline: list[Segment] = field(default_factory=list)
     overlays: list[Overlay] = field(default_factory=list)
     audio: AudioSpec | None = None
+    subtitles: SubtitlesSpec | None = None
     root: Path = Path(".")   # i percorsi relativi si risolvono da qui
 
     @classmethod
@@ -417,6 +543,7 @@ class Project:
             for i, o in enumerate(data.get("overlays") or [])
         ]
         audio = _collect(errors, AudioSpec.from_dict, data.get("audio"))
+        subtitles = _collect(errors, SubtitlesSpec.from_dict, data.get("subtitles"))
 
         _raise_all(errors, "Il progetto contiene errori")
 
@@ -426,12 +553,43 @@ class Project:
             timeline=[s for s in segments if s is not None],
             overlays=[o for o in overlays if o is not None],
             audio=audio,
+            subtitles=subtitles,
         )
 
     def resolve(self, path: Path | str) -> Path:
         """Trasforma un percorso del YAML in percorso assoluto."""
         p = Path(path)
         return p if p.is_absolute() else (self.root / p).resolve()
+
+    def scale(self, factor: float) -> None:
+        """
+        Riscala il progetto: canvas, posizioni, corpi del testo, margini.
+
+        Serve all'anteprima. Dimezzare solo il canvas e lasciare le coordinate
+        com'erano sposterebbe gli overlay fuori dal quadro - un titolo a
+        `y: 820` su un canvas alto 540 semplicemente non si vede - e
+        un'anteprima che non mostra dove finisce il testo non serve a niente.
+
+        Le misure espresse in frazione (`max_width: 0.8`) non si toccano:
+        sono gia' relative al canvas, ed e' il motivo per cui conviene usarle.
+        """
+        def px(value: float) -> int:
+            return max(1, int(round(value * factor)))
+
+        self.output.size = (_even_down(self.output.size[0] * factor),
+                            _even_down(self.output.size[1] * factor))
+
+        for ov in self.overlays:
+            ov.position = _scale_position(ov.position, factor)
+            if ov.width:
+                ov.width = px(ov.width)
+            if ov.height:
+                ov.height = px(ov.height)
+            _scale_style(ov.style, factor)
+
+        if self.subtitles is not None:
+            _scale_style(self.subtitles.style, factor)
+            self.subtitles.margin_bottom = px(self.subtitles.margin_bottom)
 
     # ----------------------------------------------------------------------
     # Verifica dei file referenziati
@@ -451,11 +609,17 @@ class Project:
         for i, ov in enumerate(self.overlays):
             if ov.src is not None:
                 refs.append((f"overlays[{i}] (immagine)", self.resolve(ov.src)))
-            if ov.font and _looks_like_font_file(ov.font):
-                refs.append((f"overlays[{i}] (font)", self.resolve(ov.font)))
+            if ov.style.font and _looks_like_font_file(ov.style.font):
+                refs.append((f"overlays[{i}] (font)", self.resolve(ov.style.font)))
 
         if self.audio is not None:
             refs.append(("audio", self.resolve(self.audio.src)))
+
+        if self.subtitles is not None:
+            refs.append(("subtitles", self.resolve(self.subtitles.src)))
+            font = self.subtitles.style.font
+            if font and _looks_like_font_file(font):
+                refs.append(("subtitles (font)", self.resolve(font)))
 
         return refs
 

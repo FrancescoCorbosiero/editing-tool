@@ -30,8 +30,10 @@ from moviepy import (
 )
 
 from . import motion, transitions
-from .models import AudioSpec, Overlay, Project, Segment
+from .fonts import find_font, font_error_message, wrap_text
+from .models import AudioSpec, ConfigError, Overlay, Project, Segment, SubtitlesSpec, TextStyle
 from .motion import MotionContext
+from .subtitles import load_srt
 from .progress import RenderProgress, format_duration
 from .timeline import clamp_overlap, plan, total_duration
 from .transitions import TransitionContext, TransitionRequest
@@ -209,6 +211,63 @@ def concat_with_transitions(clips: list, requests: list[TransitionRequest],
 # Overlay
 # --------------------------------------------------------------------------
 
+def resolve_background(style: TextStyle):
+    """
+    Traduce `bg_color` + `bg_opacity` nel colore RGBA che vuole Pillow.
+
+    Uno sfondo semitrasparente e' il modo piu' affidabile di rendere leggibile
+    del testo su un'immagine qualsiasi: il contorno aiuta, ma su uno sfondo
+    molto mosso solo un rettangolo uniforme garantisce il contrasto.
+    """
+    if style.bg_color is None:
+        return None
+    from PIL import ImageColor
+
+    color = style.bg_color
+    rgb = tuple(ImageColor.getrgb(color)[:3]) if isinstance(color, str) else tuple(color)[:3]
+    return (*rgb, int(round(255 * style.bg_opacity)))
+
+
+def make_text_clip(text: str, style: TextStyle, canvas_width: int, duration: float,
+                   root: Path | None = None):
+    """
+    Costruisce un clip di testo: font, contorno, sfondo, a capo, allineamento.
+
+    Usato sia dagli overlay sia dai sottotitoli - sono lo stesso problema.
+
+    Sul metodo: si usa sempre `label`, che disegna il testo cosi' com'e' e
+    produce un'immagine grande esattamente quanto serve. L'andata a capo la
+    calcoliamo noi (fonts.wrap_text) invece di usare il `caption` di MoviePy,
+    per due motivi: quello di MoviePy spezza dentro le parole, e restituisce
+    comunque un'immagine larga quanto il massimo consentito, il che con uno
+    sfondo semitrasparente significa un rettangolo mezzo vuoto sullo schermo.
+    """
+    font = find_font(style.font, root)
+    if font is None:
+        raise ConfigError(font_error_message(style.font))
+
+    wrap = style.wrap_width(canvas_width)
+    if wrap is not None:
+        text = wrap_text(text, font, style.font_size, wrap, style.stroke_width)
+
+    padding = style.padding
+    common = dict(
+        font=str(font),
+        font_size=style.font_size,
+        color=style.color,
+        stroke_color=style.stroke_color,
+        stroke_width=style.stroke_width,
+        bg_color=resolve_background(style),
+        text_align=style.align,
+        # Il margine e' anche il riempimento dello sfondo: senza, il rettangolo
+        # semitrasparente tocca le lettere e si legge peggio.
+        margin=(padding, padding) if padding else (None, None),
+        duration=duration,
+    )
+
+    return TextClip(text=text, method="label", **common)
+
+
 def build_overlay(ov: Overlay, project: Project, video_duration: float):
     """Costruisce un singolo overlay (immagine o testo) da sovrapporre al montaggio."""
     duration = ov.duration if ov.duration is not None else max(video_duration - ov.start, 0.1)
@@ -226,13 +285,8 @@ def build_overlay(ov: Overlay, project: Project, video_duration: float):
             else:
                 clip = clip.resized(height=ov.height)
     else:
-        clip = TextClip(
-            text=ov.text,
-            font=ov.font,
-            font_size=ov.font_size,
-            color=ov.color,
-            method="label",
-        ).with_duration(duration)
+        clip = make_text_clip(ov.text, ov.style, project.output.size[0], duration,
+                              root=project.root)
 
     clip = clip.with_start(ov.start).with_position(ov.position)
 
@@ -245,6 +299,49 @@ def build_overlay(ov: Overlay, project: Project, video_duration: float):
         clip = clip.with_effects([vfx.CrossFadeIn(ov.fade), vfx.CrossFadeOut(ov.fade)])
 
     return clip
+
+
+# --------------------------------------------------------------------------
+# Sottotitoli
+# --------------------------------------------------------------------------
+
+def build_subtitles(spec: SubtitlesSpec, project: Project, video_duration: float) -> list:
+    """
+    Trasforma un file .srt in una lista di clip di testo gia' posizionati.
+
+    Ogni battuta diventa un clip a se', con il suo inizio e la sua durata: e'
+    piu' semplice e piu' prevedibile di un unico clip che cambia contenuto, e
+    permette di gestire le battute che sforano la fine del video.
+
+    La posizione verticale si calcola da sotto (`margin_bottom`) e non da sopra,
+    perche' un sottotitolo su due righe e' piu' alto di uno su una riga: se
+    ancorassimo l'angolo in alto, la seconda riga finirebbe fuori dal quadro.
+    """
+    path = project.resolve(spec.src)
+    cues = load_srt(path)
+    if not cues:
+        log.warning("Il file %s non contiene sottotitoli.", path.name)
+        return []
+
+    canvas_w, canvas_h = project.output.size
+    clips = []
+    ignorati = 0
+
+    for cue in cues:
+        start = cue.start + spec.offset
+        end = min(cue.end + spec.offset, video_duration)
+        if start >= video_duration or end <= start:
+            ignorati += 1
+            continue
+
+        clip = make_text_clip(cue.text, spec.style, canvas_w, end - start,
+                              root=project.root)
+        y = max(0, canvas_h - spec.margin_bottom - clip.h)
+        clips.append(clip.with_start(start).with_position(("center", y)))
+
+    log.info("Sottotitoli: %d battute da %s%s", len(clips), path.name,
+             f" ({ignorati} fuori dalla durata del video)" if ignorati else "")
+    return clips
 
 
 # --------------------------------------------------------------------------
@@ -308,10 +405,17 @@ def build(project: Project):
     video = concat_with_transitions(clips, requests, size)
     log.info("Durata del montaggio: %.2fs", video.duration)
 
+    # Overlay e sottotitoli vanno sopra il montaggio, in questo ordine: un logo
+    # deve restare visibile anche quando parla qualcuno.
+    layers = []
     if project.overlays:
         log.info("Applicazione di %d overlay...", len(project.overlays))
-        layers = [video] + [build_overlay(ov, project, video.duration) for ov in project.overlays]
-        video = CompositeVideoClip(layers, size=size).with_duration(video.duration)
+        layers += [build_overlay(ov, project, video.duration) for ov in project.overlays]
+    if project.subtitles is not None:
+        layers += build_subtitles(project.subtitles, project, video.duration)
+
+    if layers:
+        video = CompositeVideoClip([video] + layers, size=size).with_duration(video.duration)
 
     if project.audio is not None:
         from moviepy import CompositeAudioClip
@@ -323,11 +427,6 @@ def build(project: Project):
             video = video.with_audio(CompositeAudioClip([video.audio, music]))
 
     return video
-
-
-def _even(value: int) -> int:
-    """Arrotonda al pari inferiore: libx264 rifiuta larghezze o altezze dispari."""
-    return max(2, int(value) - int(value) % 2)
 
 
 def discard_partial(target: Path) -> list[Path]:
@@ -358,7 +457,9 @@ def render(project: Project, dry_run: bool = False, preview: bool = False) -> Pa
     if preview:
         # Anteprima veloce: meta' risoluzione, encoding rapidissimo, qualita' bassa.
         # Serve per iterare sul montaggio senza aspettare l'export finale.
-        out.size = (_even(out.size[0] // 2), _even(out.size[1] // 2))
+        # Si riscala tutto il progetto, non solo il canvas: altrimenti gli
+        # overlay posizionati in pixel finirebbero fuori dal quadro.
+        project.scale(0.5)
         out.fps = min(out.fps, 24)
         out.preset = "ultrafast"
         out.crf = 30
