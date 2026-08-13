@@ -29,14 +29,34 @@ def setup_logging(verbose: bool) -> None:
     )
 
 
-def cmd_render(args: argparse.Namespace) -> int:
-    from .builder import close_all, render  # import pigro: MoviePy e' lento da caricare
+def load_project(args: argparse.Namespace) -> Project:
+    """
+    Carica il progetto e verifica in blocco che i file referenziati esistano.
 
-    ensure_ffmpeg()
+    La verifica sta qui e non nel builder perche' deve avvenire PRIMA di
+    costruire qualsiasi cosa: meglio quattro percorsi sbagliati elencati
+    subito che un errore alla volta dopo trenta secondi di lavoro buttato.
+    """
     project = Project.from_yaml(args.project)
+    project.validate_files()
+    return project
+
+
+def cmd_render(args: argparse.Namespace) -> int:
+    ensure_ffmpeg()
+    project = load_project(args)
 
     if args.output:
         project.output.path = Path(args.output)
+
+    if args.check:
+        # --check non renderizza: niente import di MoviePy, che costa secondi.
+        from .report import analyze, format_report
+
+        print(format_report(analyze(project, args.project)))
+        return 0
+
+    from .builder import close_all, render  # import pigro: MoviePy e' lento da caricare
 
     try:
         target = render(project, dry_run=args.dry_run, preview=args.preview)
@@ -96,6 +116,9 @@ def build_parser() -> argparse.ArgumentParser:
                           help="anteprima veloce a bassa risoluzione")
     p_render.add_argument("--dry-run", action="store_true",
                           help="costruisce la timeline senza esportare (valida il YAML)")
+    p_render.add_argument("--check", action="store_true",
+                          help="valida il progetto e stampa il riepilogo della timeline, "
+                               "senza costruire ne' esportare nulla")
     p_render.set_defaults(func=cmd_render)
 
     p_probe = sub.add_parser("probe", help="mostra i metadati di un file")

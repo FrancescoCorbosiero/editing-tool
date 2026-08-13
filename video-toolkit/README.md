@@ -58,6 +58,9 @@ più rapido per scoprire un errore di configurazione.
 # Metadati di un file (durata, risoluzione, fps, codec)
 python -m vedit probe assets/riprese.mp4
 
+# Riepilogo della timeline: cosa cade dove, e cosa non torna
+python -m vedit render projects/demo/timeline.yaml --check
+
 # Anteprima veloce: metà risoluzione, encoding ultrafast → output/demo_preview.mp4
 python -m vedit render projects/demo/timeline.yaml --preview
 
@@ -73,12 +76,59 @@ richiedere minuti; l'anteprima secondi. Togli il flag solo quando il montaggio t
 
 ---
 
+## Prima di renderizzare: `--check`
+
+`--check` legge il progetto, calcola la timeline e la stampa, senza costruire né
+esportare niente. Non importa nemmeno MoviePy: risponde in un decimo di secondo.
+
+```
+$ python -m vedit render projects/demo/timeline.yaml --check
+Progetto : projects/demo/timeline.yaml
+Canvas   : 1920x1080 @ 30 fps
+Output   : /…/output/demo.mp4
+
+  #  inizio     fine    durata  transiz.  tipo   segmento
+  0  0:00.00  0:01.00     1.00s       -   color  intro     colore rgb(0, 0, 0)
+  1  0:00.50  0:07.50     7.00s   0.50s   video  apertura  input.mp4  [5 -> 12]  1280x720
+  2  0:06.30  0:10.30     4.00s   1.20s   image  foto-1    foto1.jpg  1080x1350
+  3  0:09.50  0:16.50     7.00s   0.80s   video  chiusura  input.mp4  [40 -> 47]  1280x720
+
+Durata totale: 0:16.50  (16.50s, 495 fotogrammi)
+
+Avvisi (2):
+  - timeline[1]: transizione ridotta da 0.8s a 0.50s (non puo' superare meta' dei clip coinvolti)
+  - input.mp4: 1280x720 e' piu' piccolo del canvas 1920x1080: verra' ingrandito e apparira' meno nitido
+```
+
+La colonna `transiz.` è la sovrapposizione **effettiva** con il segmento precedente,
+che non sempre coincide con quella richiesta (vedi il primo avviso). Gli avvisi
+segnalano quello che il render farebbe in silenzio: tagli oltre la fine del file,
+sorgenti da ingrandire, risoluzioni o frame rate discordanti fra i video, una
+traccia audio più corta del montaggio.
+
+Le tre verifiche che fa `vedit` prima di iniziare qualsiasi export:
+
+1. **il YAML è valido** — e se non lo è, elenca *tutti* gli errori insieme, non uno per volta;
+2. **i file esistono** — tutti, prima di aprirne uno solo;
+3. **i conti tornano** — durate e sovrapposizioni sono calcolate dallo stesso codice
+   che poi renderizza (`vedit/timeline.py`), quindi il riepilogo non può mentire.
+
+Durante l'export vedi una riga di avanzamento con la percentuale e la stima del
+tempo residuo. Se premi **Ctrl-C** il render si ferma, chiude i processi ffmpeg
+e cancella il file parziale: un mp4 troncato è indistinguibile da uno buono
+finché non provi ad aprirlo.
+
+---
+
 ## Struttura del repo
 
 ```
 vedit/
   models.py        Schema del progetto e parsing YAML. Nessuna dipendenza da MoviePy.
+  timeline.py      Dove inizia e finisce ogni segmento. Matematica pura, niente MoviePy.
+  report.py        Il riepilogo di --check. Legge i metadati con ffprobe.
   builder.py       Traduce il progetto in clip MoviePy. È qui che vive la logica di montaggio.
+  progress.py      La barra di avanzamento dell'export.
   ffmpeg_tools.py  Chiamate dirette a ffmpeg/ffprobe per le operazioni veloci.
   cli.py           Interfaccia da riga di comando.
 projects/demo/     Progetto di esempio, documentato campo per campo.
@@ -89,7 +139,9 @@ tests/             Test rapidi che non richiedono file video.
 ```
 
 La separazione `models` / `builder` è deliberata: la validazione è testabile in
-millisecondi senza toccare MoviePy, che è lentissimo da importare.
+millisecondi senza toccare MoviePy, che è lentissimo da importare. `timeline.py` e
+`report.py` stanno dalla parte leggera del confine per lo stesso motivo — `--check`
+deve rispondere subito.
 
 ---
 

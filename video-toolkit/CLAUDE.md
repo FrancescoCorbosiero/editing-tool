@@ -32,12 +32,26 @@ di indovinare.
 
 ## Architettura e confini
 
+Il confine che conta è fra i moduli che importano MoviePy e quelli che non lo fanno.
+Tutto ciò che si può calcolare senza MoviePy sta dalla parte leggera, così resta
+testabile in millisecondi e utilizzabile dai comandi che non renderizzano.
+
+Senza MoviePy:
+
 - **`vedit/models.py`** — dataclass e parsing YAML. **Non deve importare MoviePy.**
   Questo permette di testare la validazione in millisecondi. Non violare questo confine.
-- **`vedit/builder.py`** — l'unico modulo che tocca MoviePy. Traduce `Project` in clip.
+- **`vedit/timeline.py`** — matematica delle posizioni (inizio/fine/sovrapposizione).
+  Usata sia dal builder sia da `--check`: una sola implementazione, nessuna divergenza.
+- **`vedit/report.py`** — il riepilogo di `render --check`. Legge i metadati con ffprobe.
 - **`vedit/ffmpeg_tools.py`** — subprocess verso ffmpeg/ffprobe. Nessun MoviePy.
+
+Con MoviePy:
+
+- **`vedit/builder.py`** — traduce `Project` in clip. È qui che vive il montaggio.
+- **`vedit/progress.py`** — barra di avanzamento (usa proglog, che arriva con MoviePy).
+
 - **`vedit/cli.py`** — argparse. Importa MoviePy **pigramente** dentro le funzioni
-  comando, perché l'import è lento e `probe`/`init` non ne hanno bisogno.
+  comando, perché l'import è lento e `probe`/`init`/`--check` non ne hanno bisogno.
 
 Ogni nuova funzionalità dichiarativa richiede tre modifiche coordinate:
 1. il campo in `models.py` con la sua validazione

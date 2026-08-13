@@ -15,6 +15,7 @@ La maggior parte dei tutorial online e' ancora ferma alla 1.x e non funziona qui
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from moviepy import (
@@ -29,6 +30,8 @@ from moviepy import (
 )
 
 from .models import AudioSpec, Overlay, Project, Segment
+from .progress import RenderProgress, format_duration
+from .timeline import plan, total_duration
 
 log = logging.getLogger("vedit")
 
@@ -153,33 +156,24 @@ def concat_with_transitions(clips: list, transitions: list[float], size: tuple[i
     if not clips:
         raise ValueError("Nessun clip da concatenare")
 
+    # Il calcolo di inizio/fine sta in timeline.py, che non dipende da MoviePy:
+    # cosi' `render --check` puo' mostrare le stesse cifre senza importare nulla.
+    placements = plan([clip.duration for clip in clips], transitions)
+
     placed = []
-    cursor = 0.0
+    for clip, place in zip(clips, placements):
+        current = clip.with_start(place.start)
 
-    for i, clip in enumerate(clips):
-        if i == 0:
-            placed.append(clip.with_start(0.0))
-            cursor = clip.duration
-            continue
-
-        # La transizione non puo' superare meta' della durata dei clip coinvolti
-        overlap = min(transitions[i], clips[i - 1].duration / 2, clip.duration / 2)
-        overlap = max(overlap, 0.0)
-
-        start = cursor - overlap
-        current = clip.with_start(start)
-
-        if overlap > 0:
+        if place.overlap > 0:
             # CrossFadeIn agisce sulla maschera alpha: se il clip non ne ha una,
             # gliela aggiungiamo opaca, altrimenti l'effetto non ha su cosa agire.
             if current.mask is None:
                 current = current.with_mask()
-            current = current.with_effects([vfx.CrossFadeIn(overlap)])
+            current = current.with_effects([vfx.CrossFadeIn(place.overlap)])
 
         placed.append(current)
-        cursor = start + clip.duration
 
-    montage = CompositeVideoClip(placed, size=size).with_duration(cursor)
+    montage = CompositeVideoClip(placed, size=size).with_duration(total_duration(placements))
     return montage
 
 
@@ -305,6 +299,32 @@ def build(project: Project):
     return video
 
 
+def _even(value: int) -> int:
+    """Arrotonda al pari inferiore: libx264 rifiuta larghezze o altezze dispari."""
+    return max(2, int(value) - int(value) % 2)
+
+
+def discard_partial(target: Path) -> list[Path]:
+    """
+    Cancella il file interrotto e i temporanei di MoviePy.
+
+    Un mp4 troncato a meta' export non e' riproducibile ma esiste: lasciarlo
+    li' significa ritrovarselo domani e credere che il render fosse riuscito.
+    MoviePy scrive anche l'audio in un file `...TEMP_MPY_wvf_snd.*` accanto
+    alla destinazione, e non lo ripulisce se l'export non arriva in fondo.
+    """
+    removed = []
+    candidates = [target, *target.parent.glob(f"{target.stem}TEMP_MPY_*")]
+    for path in candidates:
+        try:
+            if path.exists():
+                path.unlink()
+                removed.append(path)
+        except OSError:  # noqa: PERF203 - un file bloccato non deve mascherare l'interruzione
+            log.warning("Non sono riuscito a rimuovere %s", path)
+    return removed
+
+
 def render(project: Project, dry_run: bool = False, preview: bool = False) -> Path | None:
     """Costruisce ed esporta il video. Restituisce il percorso del file prodotto."""
     out = project.output
@@ -312,7 +332,7 @@ def render(project: Project, dry_run: bool = False, preview: bool = False) -> Pa
     if preview:
         # Anteprima veloce: meta' risoluzione, encoding rapidissimo, qualita' bassa.
         # Serve per iterare sul montaggio senza aspettare l'export finale.
-        out.size = (out.size[0] // 2, out.size[1] // 2)
+        out.size = (_even(out.size[0] // 2), _even(out.size[1] // 2))
         out.fps = min(out.fps, 24)
         out.preset = "ultrafast"
         out.crf = 30
@@ -333,16 +353,32 @@ def render(project: Project, dry_run: bool = False, preview: bool = False) -> Pa
 
     ffmpeg_params = ["-crf", str(out.crf), "-pix_fmt", "yuv420p"]
 
-    video.write_videofile(
-        str(target),
-        fps=out.fps,
-        codec=out.codec,
-        audio_codec=out.audio_codec,
-        preset=out.preset,
-        threads=out.threads,
-        ffmpeg_params=ffmpeg_params,
-    )
+    # logger=progress al posto del tqdm di MoviePy: stessa informazione,
+    # una riga sola, con la stima del tempo residuo (vedi progress.py).
+    progress = RenderProgress()
+    started = time.monotonic()
 
+    try:
+        video.write_videofile(
+            str(target),
+            fps=out.fps,
+            codec=out.codec,
+            audio_codec=out.audio_codec,
+            preset=out.preset,
+            threads=out.threads,
+            ffmpeg_params=ffmpeg_params,
+            logger=progress,
+        )
+    except KeyboardInterrupt:
+        progress.close_line()
+        close_all()   # prima i processi ffmpeg, poi i file: altrimenti restano aperti
+        for path in discard_partial(target):
+            log.warning("Interrotto: rimosso il file parziale %s", path.name)
+        raise
+    finally:
+        progress.close_line()
+
+    log.info("Export completato in %s", format_duration(time.monotonic() - started))
     close_all()
     return target
 

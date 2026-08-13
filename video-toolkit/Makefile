@@ -1,4 +1,4 @@
-.PHONY: install test check demo preview clean
+.PHONY: install test check dry-run demo preview clean
 
 install:
 	python -m venv .venv
@@ -9,6 +9,9 @@ test:
 	pytest -q
 
 check:
+	python -m vedit render projects/demo/timeline.yaml --check
+
+dry-run:
 	python -m vedit render projects/demo/timeline.yaml --dry-run
 
 preview:

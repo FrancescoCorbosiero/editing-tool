@@ -17,6 +17,14 @@ import yaml
 # Modalita' di adattamento di un'immagine/video al canvas di output
 FIT_MODES = ("contain", "cover", "stretch")
 
+# Estensioni riconosciute come file di font: un `font` che finisce cosi' e' un
+# percorso da verificare, qualsiasi altra stringa e' un nome di font di sistema.
+FONT_SUFFIXES = (".ttf", ".otf", ".ttc", ".woff", ".woff2")
+
+
+def _looks_like_font_file(value: str) -> bool:
+    return Path(value).suffix.lower() in FONT_SUFFIXES
+
 
 class ConfigError(ValueError):
     """Errore di configurazione del progetto (YAML malformato o valori invalidi)."""
@@ -26,6 +34,31 @@ def _require(data: dict, key: str, where: str) -> Any:
     if key not in data:
         raise ConfigError(f"Campo obbligatorio mancante: '{key}' in {where}")
     return data[key]
+
+
+def _collect(errors: list[str], fn, *args, **kwargs):
+    """
+    Esegue `fn` accumulando l'eventuale ConfigError invece di propagarlo.
+
+    Serve a segnalare TUTTI i problemi di un file YAML in un colpo solo:
+    correggerne uno alla volta, rilanciando il comando dopo ogni fix, e' il
+    modo piu' lento possibile di sistemare un progetto.
+    """
+    try:
+        return fn(*args, **kwargs)
+    except ConfigError as exc:
+        errors.append(str(exc))
+        return None
+
+
+def _raise_all(errors: list[str], intro: str) -> None:
+    """Solleva un unico ConfigError che elenca tutti i problemi raccolti."""
+    if not errors:
+        return
+    if len(errors) == 1:
+        raise ConfigError(errors[0])
+    lines = "\n".join(f"  - {e}" for e in errors)
+    raise ConfigError(f"{intro} ({len(errors)}):\n{lines}")
 
 
 def _as_size(value: Any, where: str) -> tuple[int, int]:
@@ -152,6 +185,34 @@ class Segment:
 
         return seg
 
+    def timeline_duration(
+        self, defaults: "Defaults", source_duration: float | None = None
+    ) -> float | None:
+        """
+        Quanti secondi occupa questo segmento nella timeline.
+
+        Per un video senza `end` la durata dipende dal file: passa
+        `source_duration` (letta con ffprobe) oppure accetta None come risposta.
+        Attenzione a `speed`: divide la durata, perche' a velocita' 2x sette
+        secondi di sorgente ne occupano tre e mezzo sul montaggio.
+        """
+        if self.type in ("image", "color"):
+            return self.duration if self.duration is not None else defaults.image_duration
+
+        start = self.start or 0.0
+        end = self.end if self.end is not None else source_duration
+        if end is None:
+            return None
+        return max(end - start, 0.0) / self.speed
+
+    def describe(self) -> str:
+        """Etichetta breve per log e riepiloghi: label se c'e', altrimenti il file."""
+        if self.label:
+            return self.label
+        if self.src is not None:
+            return Path(self.src).name
+        return self.type
+
 
 @dataclass
 class Overlay:
@@ -253,20 +314,81 @@ class Project:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Project":
+        if not isinstance(data, dict):
+            raise ConfigError("Il file di progetto deve contenere una mappa YAML")
+
         timeline_data = data.get("timeline") or []
         if not timeline_data:
             raise ConfigError("Il progetto deve avere almeno un segmento in 'timeline'")
 
-        project = cls(
-            output=OutputSpec.from_dict(data.get("output")),
-            defaults=Defaults.from_dict(data.get("defaults")),
-            timeline=[Segment.from_dict(s, i) for i, s in enumerate(timeline_data)],
-            overlays=[Overlay.from_dict(o, i) for i, o in enumerate(data.get("overlays") or [])],
-            audio=AudioSpec.from_dict(data.get("audio")),
+        # Si raccolgono tutti gli errori di tutte le sezioni prima di arrendersi:
+        # un YAML con tre sbagli deve produrre tre messaggi, non tre esecuzioni.
+        errors: list[str] = []
+        output = _collect(errors, OutputSpec.from_dict, data.get("output")) or OutputSpec()
+        defaults = _collect(errors, Defaults.from_dict, data.get("defaults")) or Defaults()
+
+        segments = [_collect(errors, Segment.from_dict, s, i) for i, s in enumerate(timeline_data)]
+        overlays = [
+            _collect(errors, Overlay.from_dict, o, i)
+            for i, o in enumerate(data.get("overlays") or [])
+        ]
+        audio = _collect(errors, AudioSpec.from_dict, data.get("audio"))
+
+        _raise_all(errors, "Il progetto contiene errori")
+
+        return cls(
+            output=output,
+            defaults=defaults,
+            timeline=[s for s in segments if s is not None],
+            overlays=[o for o in overlays if o is not None],
+            audio=audio,
         )
-        return project
 
     def resolve(self, path: Path | str) -> Path:
         """Trasforma un percorso del YAML in percorso assoluto."""
         p = Path(path)
         return p if p.is_absolute() else (self.root / p).resolve()
+
+    # ----------------------------------------------------------------------
+    # Verifica dei file referenziati
+    # ----------------------------------------------------------------------
+
+    def referenced_files(self) -> list[tuple[str, Path]]:
+        """
+        Tutti i file che il progetto si aspetta di trovare su disco,
+        come coppie (descrizione leggibile, percorso assoluto).
+        """
+        refs: list[tuple[str, Path]] = []
+
+        for i, seg in enumerate(self.timeline):
+            if seg.src is not None:
+                refs.append((f"timeline[{i}] ({seg.describe()})", self.resolve(seg.src)))
+
+        for i, ov in enumerate(self.overlays):
+            if ov.src is not None:
+                refs.append((f"overlays[{i}] (immagine)", self.resolve(ov.src)))
+            if ov.font and _looks_like_font_file(ov.font):
+                refs.append((f"overlays[{i}] (font)", self.resolve(ov.font)))
+
+        if self.audio is not None:
+            refs.append(("audio", self.resolve(self.audio.src)))
+
+        return refs
+
+    def missing_files(self) -> list[str]:
+        """
+        Elenca i file referenziati che non esistono, uno per riga.
+
+        Il controllo e' fatto in blocco PRIMA di iniziare il render: scoprire
+        al minuto tre di export che manca l'ultima immagine e' il modo peggiore
+        di perdere tempo.
+        """
+        return [
+            f"{where}: file non trovato: {path}"
+            for where, path in self.referenced_files()
+            if not path.exists()
+        ]
+
+    def validate_files(self) -> None:
+        """Solleva un unico ConfigError che elenca tutti i file mancanti."""
+        _raise_all(self.missing_files(), "File referenziati ma non trovati")
