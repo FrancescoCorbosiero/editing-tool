@@ -32,17 +32,42 @@ di indovinare.
 
 ## Architettura e confini
 
+Il confine che conta è fra i moduli che importano MoviePy e quelli che non lo fanno.
+Tutto ciò che si può calcolare senza MoviePy sta dalla parte leggera, così resta
+testabile in millisecondi e utilizzabile dai comandi che non renderizzano.
+
+Senza MoviePy:
+
 - **`vedit/models.py`** — dataclass e parsing YAML. **Non deve importare MoviePy.**
   Questo permette di testare la validazione in millisecondi. Non violare questo confine.
-- **`vedit/builder.py`** — l'unico modulo che tocca MoviePy. Traduce `Project` in clip.
+- **`vedit/timeline.py`** — matematica delle posizioni (inizio/fine/sovrapposizione).
+  Usata sia dal builder sia da `--check`: una sola implementazione, nessuna divergenza.
+- **`vedit/transitions.py`** — registry `nome → funzione` delle transizioni. Le sue
+  funzioni **usano** MoviePy ma lo importano al loro interno, perché `models.py`
+  importa questo modulo per validare i nomi. Non spostare quegli import in cima.
+- **`vedit/motion.py`** — registry dei movimenti sulle immagini (Ken Burns), stessa
+  regola sugli import di `transitions.py`.
+- **`vedit/subtitles.py`** — parsing dei `.srt`. Solo manipolazione di testo.
+- **`vedit/proxies.py`** — copie leggere dei sorgenti, con cache basata sull'impronta
+  del file. Chiama ffmpeg, non MoviePy.
+- **`vedit/fonts.py`** — ricerca dei font e a capo del testo (usa Pillow, non MoviePy).
+- **`vedit/report.py`** — il riepilogo di `render --check`. Legge i metadati con ffprobe.
 - **`vedit/ffmpeg_tools.py`** — subprocess verso ffmpeg/ffprobe. Nessun MoviePy.
+
+Con MoviePy:
+
+- **`vedit/builder.py`** — traduce `Project` in clip. È qui che vive il montaggio.
+- **`vedit/progress.py`** — barra di avanzamento (usa proglog, che arriva con MoviePy).
+
 - **`vedit/cli.py`** — argparse. Importa MoviePy **pigramente** dentro le funzioni
-  comando, perché l'import è lento e `probe`/`init` non ne hanno bisogno.
+  comando, perché l'import è lento e `probe`/`init`/`--check` non ne hanno bisogno.
 
 Ogni nuova funzionalità dichiarativa richiede tre modifiche coordinate:
 1. il campo in `models.py` con la sua validazione
 2. la traduzione in `builder.py`
 3. la riga nella tabella dello schema in `README.md`
+
+Se introduce un termine di montaggio nuovo, aggiungilo anche a `docs/GLOSSARIO.md`.
 
 ## Convenzioni
 
@@ -57,11 +82,20 @@ Ogni nuova funzionalità dichiarativa richiede tre modifiche coordinate:
 - Nessuna dipendenza nuova senza motivo forte. Lo stack è: moviepy, PyYAML, numpy,
   Pillow. FFmpeg è un binario di sistema, non un pacchetto pip.
 
-## Test
+## Test e lint
 
 ```bash
 pytest -q
+ruff check .
 ```
+
+`ruff check` deve passare (configurazione in `pyproject.toml`). `ruff format` è
+configurato ma **non** va applicato in blocco al codice esistente: i commenti
+allineati in colonna sono voluti e il formatter li schiaccerebbe.
+
+Il confine "niente MoviePy nei moduli leggeri" è verificato da
+`tests/test_confini.py`: se aggiungi un modulo dalla parte leggera, mettilo in
+quella lista.
 
 I test **non devono richiedere file video**: usa segmenti `type: color`, generati in
 memoria. Se una funzionalità ha bisogno di un sorgente reale, genera un file
@@ -100,5 +134,10 @@ segmenti; se salta di colpo, la sovrapposizione non sta funzionando.
   directory. Usa sempre `project.resolve(path)`.
 - Con `pix_fmt` diverso da `yuv420p` il video non si apre su molti player. È già
   forzato negli `ffmpeg_params`.
+- `TextClip` vuole il **percorso** di un file di font, non un nome. `fonts.py` risolve
+  percorsi, nomi installati e un default di sistema: passa sempre da lì.
+- Il `method="caption"` di MoviePy 2.1.x spezza **dentro** le parole quando il testo
+  occupa più di due righe (mescola indici assoluti e relativi in `__break_text`).
+  L'a capo lo calcola `fonts.wrap_text`: non tornare a `caption`.
 - Larghezze/altezze dispari fanno fallire libx264. Se aggiungi ridimensionamenti
   dinamici (zoom, Ken Burns), arrotonda a numeri pari.

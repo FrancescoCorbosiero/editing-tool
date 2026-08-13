@@ -3,7 +3,7 @@ Test del builder che non richiedono file sorgente: usano segmenti 'color',
 generati in memoria. Verificano la matematica delle transizioni.
 """
 
-from vedit.builder import build, close_all
+from vedit.builder import build, close_all, discard_partial
 from vedit.models import Project
 
 
@@ -46,3 +46,24 @@ def test_transizione_limitata_a_meta_clip():
 
 def test_clip_singolo():
     assert build_durata([5], []) == 5
+
+
+def test_ctrl_c_rimuove_il_file_parziale_e_i_temporanei(tmp_path):
+    # Simula quello che resta su disco quando l'export viene interrotto:
+    # il video troncato piu' il file audio temporaneo di MoviePy.
+    target = tmp_path / "montaggio.mp4"
+    target.write_bytes(b"mp4 a meta")
+    temporaneo = tmp_path / "montaggioTEMP_MPY_wvf_snd.mp3"
+    temporaneo.write_bytes(b"audio temporaneo")
+    estraneo = tmp_path / "montaggio_vecchio.mp4"
+    estraneo.write_bytes(b"da non toccare")
+
+    rimossi = discard_partial(target)
+
+    assert set(rimossi) == {target, temporaneo}
+    assert not target.exists() and not temporaneo.exists()
+    assert estraneo.exists()
+
+
+def test_rimuovere_un_file_inesistente_non_e_un_errore(tmp_path):
+    assert discard_partial(tmp_path / "mai-creato.mp4") == []

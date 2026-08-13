@@ -55,8 +55,9 @@ def probe(path: str | Path) -> dict:
     ])
     data = json.loads(result.stdout)
 
-    video_stream = next((s for s in data.get("streams", []) if s.get("codec_type") == "video"), None)
-    audio_stream = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), None)
+    streams = data.get("streams", [])
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+    audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
 
     fps = None
     if video_stream and video_stream.get("r_frame_rate"):

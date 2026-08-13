@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vedit"
+description = "Montaggio video dichiarativo: da un file YAML a un mp4"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# La versione vive in vedit/__init__.py: un posto solo, nessuna occasione di
+# scriverne due diverse.
+dynamic = ["version"]
+
+# FFmpeg non e' un pacchetto pip: e' un binario di sistema, e va installato a
+# parte (vedi README). Qui ci sono solo le librerie Python.
+dependencies = [
+    "moviepy>=2.1.1",   # 2.x: l'API e' incompatibile con la 1.x, non abbassare
+    "PyYAML>=6.0",
+    "numpy>=1.25",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+# Rende disponibile il comando `vedit` dopo `pip install -e .`,
+# senza dover scrivere ogni volta `python -m vedit`.
+vedit = "vedit.cli:main"
+
+[tool.setuptools]
+packages = ["vedit"]
+
+[tool.setuptools.dynamic]
+version = { attr = "vedit.__version__" }
+
+# ---------------------------------------------------------------------------
+# ruff: lint e formattazione. `ruff check` trova i problemi, `ruff format` li
+# sistema dove sono di stile.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["output", "proxies", "assets"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # errori e avvisi di stile (pycodestyle)
+    "F",         # errori veri: nomi non definiti, import inutilizzati (pyflakes)
+    "I",         # ordine degli import (isort)
+    "UP",        # costrutti superati per la versione di Python dichiarata
+    "B",         # trappole comuni (flake8-bugbear)
+    "C4",        # comprehension scritte meglio
+    "RUF",       # regole proprie di ruff
+]
+ignore = [
+    # I commenti e le stringhe utente sono in italiano senza accenti (perche'
+    # convivono con terminali e sistemi che li rendono male): RUF003 segnala
+    # gli apostrofi come caratteri ambigui, ma qui sono voluti.
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Nei test i nomi lunghi e le import dentro le funzioni sono voluti: servono a
+# tenere veloci i test che non devono toccare MoviePy.
+"tests/*" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+# NOTA: `ruff format` e' disponibile ma NON e' obbligatorio, e la CI non lo
+# verifica. Il motivo: questo codice e' anche materiale di studio, e i commenti
+# in colonna sui campi delle dataclass
+#     duration: float            # durata gia' limitata
+#     direction: str             # uno di DIRECTIONS
+# si leggono come una tabella. Il formatter li schiaccerebbe a uno spazio.
+# Usalo pure su un file nuovo se ti fa comodo; `ruff check`, quello si', deve
+# passare sempre.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
