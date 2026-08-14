@@ -36,7 +36,13 @@ from .motion import MotionContext
 from .progress import RenderProgress, format_duration
 from .proxies import find_proxy
 from .subtitles import load_srt
-from .timeline import clamp_overlap, durations_from_positions, plan, total_duration
+from .timeline import (
+    clamp_overlap,
+    effective_overlaps,
+    plan,
+    plan_anchored,
+    total_duration,
+)
 from .transitions import TransitionContext, TransitionRequest
 
 log = logging.getLogger("vedit")
@@ -189,7 +195,8 @@ def build_segment(seg: Segment, project: Project, use_proxy: bool = False,
 # --------------------------------------------------------------------------
 
 def concat_with_transitions(clips: list, requests: list[TransitionRequest],
-                            size: tuple[int, int]):
+                            size: tuple[int, int],
+                            placements: list | None = None):
     """
     Concatena i clip applicando la transizione in ENTRATA di ciascuno.
 
@@ -202,6 +209,10 @@ def concat_with_transitions(clips: list, requests: list[TransitionRequest],
     Le transizioni senza sovrapposizione (stacco, dissolvenza al nero) lasciano
     i clip in fila e si consumano al loro interno.
 
+    `placements` arriva gia' calcolato dal montaggio a istanti, dove le
+    posizioni non sono la somma delle durate ma i tagli dichiarati con `at`
+    (vedi timeline.plan_anchored). Negli altri casi le calcola qui.
+
     Chi applica l'effetto e' il registry in transitions.py: questa funzione non
     sa cosa sia un wipe, sa solo che qualcuno gli restituira' due clip modificati.
     """
@@ -211,18 +222,27 @@ def concat_with_transitions(clips: list, requests: list[TransitionRequest],
     durations = [clip.duration for clip in clips]
     specs = [transitions.get(req.type) for req in requests]
 
-    # La durata effettiva vale per tutti i tipi (anche quelli che non
-    # sovrappongono: una dissolvenza al nero piu' lunga del clip non ha senso),
-    # mentre la sovrapposizione la chiedono solo i tipi che ne hanno bisogno.
-    effective = [0.0] * len(clips)
-    overlaps = [0.0] * len(clips)
-    for i in range(1, len(clips)):
-        effective[i] = clamp_overlap(requests[i].duration, durations[i - 1], durations[i])
-        overlaps[i] = effective[i] if specs[i].overlaps else 0.0
-
-    # Il calcolo di inizio/fine sta in timeline.py, che non dipende da MoviePy:
-    # cosi' `render --check` puo' mostrare le stesse cifre senza importare nulla.
-    placements = plan(durations, overlaps)
+    if placements is None:
+        # La durata effettiva vale per tutti i tipi (anche quelli che non
+        # sovrappongono: una dissolvenza al nero piu' lunga del clip non ha
+        # senso), mentre la sovrapposizione la chiedono solo i tipi che ne hanno
+        # bisogno.
+        effective = effective_overlaps([r.duration for r in requests], durations)
+        overlaps = [e if specs[i].overlaps else 0.0 for i, e in enumerate(effective)]
+        # Il calcolo di inizio/fine sta in timeline.py, che non dipende da
+        # MoviePy: cosi' `render --check` mostra le stesse cifre senza importare
+        # nulla.
+        placements = plan(durations, overlaps)
+    else:
+        # A istanti la riduzione l'ha gia' fatta plan_anchored, misurandola sul
+        # tempo che ogni segmento possiede fra un taglio e il successivo: qui si
+        # rilegge da li' invece di rifarla sulle durate dei clip, che ormai
+        # contengono anche la sovrapposizione.
+        effective = [p.overlap for p in placements]
+        for i, spec in enumerate(specs):
+            if not spec.overlaps:
+                effective[i] = clamp_overlap(requests[i].duration,
+                                             durations[i - 1] if i else 0.0, durations[i])
 
     placed: list = []
     for i, (clip, place) in enumerate(zip(clips, placements, strict=True)):
@@ -427,30 +447,42 @@ def build(project: Project, use_proxy: bool = False):
     """Costruisce il clip finale, pronto per write_videofile()."""
     size = project.output.size
 
+    # La transizione dichiarata sul segmento vince sul default globale.
+    requests = [seg.transition_request(project.defaults) for seg in project.timeline]
+
     # Se il progetto dichiara gli istanti (`at`), le durate si ricavano da quelli:
     # ogni segmento finisce quando comincia il successivo.
     project.validate_positions()
     positions = project.cut_positions()
     targets: list[float | None] = [None] * len(project.timeline)
+    placements = None
+
     if positions is not None:
         ultimo = project.timeline[-1]
         coda = ultimo.timeline_duration(project.defaults)
         if coda is None:
             coda = (ultimo.end or 0) - (ultimo.start or 0)
-        targets = durations_from_positions(positions, coda)
+        # Le posizioni si calcolano PRIMA di costruire i clip, non dopo: con una
+        # transizione sovrapposta il segmento entra in anticipo, e quindi di
+        # sorgente ne serve un pezzo piu' lungo del tempo che possiede. La
+        # riduzione delle sovrapposizioni la fa plan_anchored, che e' anche
+        # l'unico posto in cui viene fatta.
+        sovrapposte = [
+            request.duration if transitions.get(request.type).overlaps else 0.0
+            for request in requests
+        ]
+        placements = plan_anchored(positions, coda, sovrapposte)
+        targets = [p.duration for p in placements]
         log.info("Montaggio a istanti: %d tagli dichiarati", len(positions))
 
     log.info("Costruzione di %d segmenti...", len(project.timeline))
     clips = []
-    requests = []
     for i, seg in enumerate(project.timeline):
         clips.append(build_segment(seg, project, use_proxy, target=targets[i]))
-        # La transizione dichiarata sul segmento vince sul default globale
-        requests.append(seg.transition_request(project.defaults))
         log.info("  [%d] %s %s (%.2fs)", i, seg.type, seg.label or seg.src or "",
                  clips[-1].duration)
 
-    video = concat_with_transitions(clips, requests, size)
+    video = concat_with_transitions(clips, requests, size, placements=placements)
     log.info("Durata del montaggio: %.2fs", video.duration)
 
     # Overlay e sottotitoli vanno sopra il montaggio, in questo ordine: un logo

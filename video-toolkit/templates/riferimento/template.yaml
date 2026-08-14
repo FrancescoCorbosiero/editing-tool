@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# TEMPLATE AUDIO: riferimento
+#
+# Un montaggio riutilizzabile. La musica e gli istanti dei tagli sono fissi,
+# i media no: quelli li porti tu.
+#
+#   python -m vedit apply <questa cartella> foto1.jpg riprese.mp4 ... --preview
+#
+# `at` e' l'istante in cui uno slot entra in scena, misurato sulla traccia
+# audio qui sotto. Uno slot finisce quando comincia il successivo, e l'ultimo
+# finisce con la traccia: le durate non si scrivono, si deducono.
+# ---------------------------------------------------------------------------
+
+name: riferimento
+duration: 12.746          # quanto dura il montaggio completo
+
+audio:
+  src: audio.m4a          # la traccia, che vive dentro questa cartella
+  bpm: 118.4              # un battito ogni 0.507s
+  offset: 0.17            # dove cade il primo battito
+  volume: 1               # 1 = com'e', 0.5 = a meta'
+  fade_out: 0             # dissolvenza audio in chiusura
+
+format:
+  size: [1152, 576]       # si puo' cambiare quando lo applichi: --size 1080x1920
+  fps: 30
+
+source:                 # da dove e' stato estratto: solo memoria
+  file: riferimento.mp4
+  duration: 12.75
+  extracted: 2026-08-14
+
+# ---------------------------------------------------------------------------
+# SLOT: 18 posti da riempire, in quest'ordine.
+#
+# motion vale solo se in quello slot finisce una FOTO (un video si muove
+# gia' per conto suo). Toglilo, o cambialo, se non ti convince.
+# ---------------------------------------------------------------------------
+slots:
+  - at: 0.0               #  1)  dura 4.22s, 8.34 battiti
+    motion: pan_left
+    amount: 0.211
+  - at: 4.224             #  2)  dura 0.51s, 1.00 battiti
+  - at: 4.731             #  3)  dura 0.51s, 1.00 battiti
+  - at: 5.238             #  4)  dura 0.66s, 1.31 battiti
+    motion: zoom_out
+    amount: 0.05
+  - at: 5.9               #  5)  dura 0.50s, 0.99 battiti
+  - at: 6.4               #  6)  dura 0.53s, 1.05 battiti
+  - at: 6.933             #  7)  dura 0.27s, 0.53 battiti
+  - at: 7.2               #  8)  dura 0.32s, 0.63 battiti
+  - at: 7.518             #  9)  dura 0.42s, 0.82 battiti
+  - at: 7.933             # 10)  dura 0.34s, 0.68 battiti
+  - at: 8.278             # 11)  dura 0.36s, 0.70 battiti
+  - at: 8.633             # 12)  dura 0.40s, 0.80 battiti
+  - at: 9.038             # 13)  dura 0.51s, 1.00 battiti
+  - at: 9.545             # 14)  dura 0.42s, 0.83 battiti
+  - at: 9.967             # 15)  dura 0.85s, 1.67 battiti
+    motion: pan_down
+    amount: 0.05
+  - at: 10.812            # 16)  dura 0.76s, 1.50 battiti
+    motion: zoom_out
+    amount: 0.05
+  - at: 11.572            # 17)  dura 0.66s, 1.30 battiti
+    motion: zoom_in
+    amount: 0.05
+  - at: 12.233            # 18)  dura 0.51s, 1.01 battiti

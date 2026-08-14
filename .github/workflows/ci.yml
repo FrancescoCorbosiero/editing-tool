@@ -76,6 +76,54 @@ jobs:
       - name: Anteprima del progetto demo
         run: vedit render projects/demo/timeline.yaml --preview
 
+      - name: Il giro dei template, da capo a fondo
+        # extract -> apply -> verifica che i tagli cadano dove dice il template.
+        # E' la promessa su cui si regge tutta la funzionalita': se salta, un
+        # template non vale niente, perche' il suo unico valore e' la sincronia.
+        run: |
+          # Un riferimento con tagli a istanti noti (2.0, 3.5) e una cassa a 120 BPM
+          ffmpeg -v error \
+                 -f lavfi -i color=c=red:s=320x180:r=30:d=2 \
+                 -f lavfi -i color=c=blue:s=320x180:r=30:d=1.5 \
+                 -f lavfi -i color=c=yellow:s=320x180:r=30:d=2.5 \
+                 -f lavfi -i "aevalsrc='sin(2*PI*60*t)*exp(-14*mod(t,0.5))':d=6:s=44100" \
+                 -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]" \
+                 -map "[v]" -map 3:a -c:a aac -pix_fmt yuv420p /tmp/riferimento.mp4
+
+          vedit shots /tmp/riferimento.mp4
+          vedit extract /tmp/riferimento.mp4 -o /tmp/tpl --force
+          vedit templates /tmp | tail -2
+
+          # Tre tinte diverse, una per slot: cosi' il taglio si vede nei pixel
+          for c in green magenta cyan; do
+            ffmpeg -v error -f lavfi -i color=c=$c:s=320x180:r=30:d=4 \
+                   -pix_fmt yuv420p /tmp/media_$c.mp4
+          done
+
+          vedit apply /tmp/tpl /tmp/media_green.mp4 /tmp/media_magenta.mp4 \
+                      /tmp/media_cyan.mp4 --check
+          vedit apply /tmp/tpl /tmp/media_green.mp4 /tmp/media_magenta.mp4 \
+                      /tmp/media_cyan.mp4 -o /tmp/montato.mp4
+
+          python - <<'PY'
+          import numpy as np, yaml
+          from moviepy import VideoFileClip
+
+          template = yaml.safe_load(open("/tmp/tpl/template.yaml"))
+          istanti = [s["at"] for s in template["slots"]]
+          clip = VideoFileClip("/tmp/montato.mp4")
+          try:
+              assert abs(clip.duration - template["duration"]) < 0.1, clip.duration
+              for at in istanti[1:]:
+                  prima = clip.get_frame(at - 0.05).mean(axis=(0, 1))
+                  dopo = clip.get_frame(at + 0.05).mean(axis=(0, 1))
+                  salto = np.abs(prima - dopo).max()
+                  assert salto > 20, f"nessun taglio a {at}: {prima} -> {dopo}"
+                  print(f"OK: taglio a {at}s  {prima.round(0)} -> {dopo.round(0)}")
+          finally:
+              clip.close()
+          PY
+
       - name: Verifica il file prodotto
         # Un export puo' uscire con codice 0 e produrre un video sbagliato:
         # si controllano durata, dimensioni e che i fotogrammi non siano neri.

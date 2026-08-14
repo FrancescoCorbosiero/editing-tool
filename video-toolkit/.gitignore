@@ -6,6 +6,14 @@ assets/*
 !assets/README.md
 proxies/
 
+# I template sono l'eccezione alla regola "i media non si versionano", e lo
+# sono per costruzione: un template audio SENZA la sua traccia non e'
+# applicabile: gli istanti dei tagli sono i battiti di quella musica, e da soli
+# non vogliono dire niente. La traccia e' quindi parte del template, non un
+# allegato, e pesa quanto una canzone tagliata a quindici secondi.
+!templates/*/audio.*
+!templates/*/template.yaml
+
 # Ogni progetto in projects/ si porta dietro i suoi file e i suoi render:
 # il montaggio (timeline.yaml) si versiona, i media no.
 projects/*/assets/*

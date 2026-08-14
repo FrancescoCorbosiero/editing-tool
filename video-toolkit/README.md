@@ -3,6 +3,10 @@
 Toolkit per montare video scrivendo un file YAML invece di trascinare clip in una GUI.
 Costruito su **MoviePy 2.x** (composizione) e **FFmpeg** (operazioni veloci).
 
+Due modi di usarlo, e il secondo è quello che fa risparmiare le ore.
+
+**1. Scrivere il montaggio.** Un file YAML descrive la timeline, `vedit` la esporta:
+
 ```yaml
 timeline:
   - type: video
@@ -18,6 +22,20 @@ timeline:
 ```bash
 python -m vedit render projects/demo/timeline.yaml
 ```
+
+**2. Riusare un montaggio che funziona.** Da un video che ti piace si estrae un
+**template audio**: la musica, il tempo, gli istanti dei tagli, il formato. I media
+restano fuori — quelli li porti tu, ogni volta diversi.
+
+```bash
+python -m vedit extract riferimento.mp4          # -> templates/riferimento/
+python -m vedit apply templates/riferimento le-mie-foto/ --preview
+```
+
+È lo stesso gesto di quando su CapCut riusi un "suono": non stai prendendo in
+prestito una canzone, stai prendendo in prestito un montaggio che su quella canzone
+funziona. La differenza è che qui il montaggio è un file di testo che puoi leggere,
+correggere e versionare.
 
 ---
 
@@ -74,6 +92,18 @@ python -m vedit fonts
 # Tempo e battiti di una traccia, per montare a tempo di musica
 python -m vedit beats assets/musica.mp3
 
+# Dove stacca un video: i tagli che il rilevatore riconosce
+python -m vedit shots riferimento.mp4
+
+# Estrae un template audio da un video che ti piace
+python -m vedit extract riferimento.mp4
+
+# I template che hai in casa
+python -m vedit templates
+
+# Applica un template ai tuoi media e monta
+python -m vedit apply templates/riferimento foto1.jpg riprese.mp4 --preview
+
 # Riepilogo della timeline: cosa cade dove, e cosa non torna
 python -m vedit render projects/demo/timeline.yaml --check
 
@@ -97,6 +127,184 @@ richiedere minuti; l'anteprima secondi. Togli il flag solo quando il montaggio t
 L'anteprima riscala **tutto** il progetto, non solo il canvas: posizioni degli
 overlay, corpo del testo, margini dei sottotitoli. Quello che vedi a metà
 risoluzione è quello che otterrai a piena risoluzione, in miniatura.
+
+---
+
+## Template audio
+
+Un video di riferimento contiene due cose separabili. Da una parte **i media**: le
+riprese, le foto, quello che si vede. Dall'altra la **struttura**: la musica, il
+tempo, gli istanti in cui si stacca, le transizioni, il formato. La prima parte è
+irripetibile — sono i tuoi filmati — la seconda no: quella è una ricetta, e si
+applica a materiale completamente diverso.
+
+Un template è quella seconda parte.
+
+### Perché "audio"
+
+Perché la traccia non è un accessorio, è la struttura portante. Gli istanti dei
+tagli sono i battiti **di quella musica**: staccarli da lei li renderebbe numeri a
+caso. Per questo il file audio vive dentro il template, ed è l'unico media che un
+template si porta dietro.
+
+Due conseguenze pratiche: un template dura quanto la sua traccia, e ha un numero
+fisso di posti da riempire.
+
+### Il giro completo
+
+```bash
+# 1. Guarda cosa ha capito il rilevatore, prima di costruirci sopra
+python -m vedit shots riferimento.mp4
+
+# 2. Estrai il template: traccia audio, BPM, istanti dei tagli, formato
+python -m vedit extract riferimento.mp4 -o templates/il-mio-stile
+
+# 3. Applicalo ai tuoi file
+python -m vedit apply templates/il-mio-stile foto1.jpg gita.mp4@12 --preview
+
+# 4. Se ti serve toccare qualcosa a mano, esci in un progetto normale
+python -m vedit apply templates/il-mio-stile media/ --to-yaml progetti/vacanza.yaml
+python -m vedit render progetti/vacanza.yaml --preview
+```
+
+Il passo 4 è la valvola di sfogo che tiene onesto tutto il resto: un template
+**genera un `timeline.yaml`**, non è un secondo motore di montaggio. Quello che
+produce è esattamente ciò che avresti potuto scrivere a mano, e da lì in poi vale
+tutto quello che sai già.
+
+### Cosa succede durante l'estrazione
+
+```
+$ python -m vedit extract riferimento.mp4
+Template : riferimento  ->  templates/riferimento
+Traccia  : audio.m4a  (12.75s)
+Tempo    : 118.4 BPM  (un battito ogni 0.507s, il primo a 0.170s)
+Formato  : 1152x576 @ 30 fps
+Slot     : 18  (il più corto 0.27s, il più lungo 4.22s)
+Griglia  : half - 9 tagli riallineati al battito, in media di 19 ms
+Scartati : 2 tagli troppo ravvicinati per essere slot
+
+  #   entra a   dura   battiti  transizione  movimento
+  0      0.00   4.22s     8.34  cut          pan_left
+  1      4.22   0.51s     1.00  cut          -
+  2      4.73   0.51s     1.00  cut          -
+  ...
+```
+
+Tre analisi diverse messe d'accordo:
+
+| passo | modulo | domanda |
+|---|---|---|
+| battito | `beats.py` | in quali istanti cade la cassa? |
+| tagli | `scenes.py` | in quali istanti cambia l'inquadratura? |
+| allineamento | `extract.py` | quali tagli erano sul battito, e quanto ci sono andati vicini? |
+
+**L'allineamento è il passaggio che rende un template riusabile.** I tagli misurati
+non cadono mai esattamente sul battito, nemmeno in un montaggio fatto benissimo: a
+30 fps un fotogramma dura 33 ms, e chi ha montato aveva la sua mano. Scrivere nel
+template i tagli grezzi significherebbe portarsi dietro quelle imprecisioni per
+sempre. Avvicinarli al battito più vicino dà una griglia pulita.
+
+Il riallineamento è **prudente**: sposta un taglio solo se era già vicino (entro un
+quarto di suddivisione). Un taglio a metà strada fra due battiti non è sbagliato, è
+in levare — una scelta — e resta dov'è. Con `--grid` decidi la finezza della
+griglia:
+
+| `--grid` | allinea a | quando |
+|---|---|---|
+| `beat` | i battiti | montaggi lenti, un'immagine per battito |
+| `half` (default) | anche i mezzi battiti | il caso normale: molti stacchi in levare |
+| `quarter` | anche i quarti | montaggi fittissimi |
+| `off` | niente | quando il rilevamento ti convince già così |
+
+### Come i media finiscono negli slot
+
+In ordine. Il primo file nel primo slot, e via così.
+
+```bash
+# Una cartella si espande nei file che contiene, in ordine alfabetico
+python -m vedit apply templates/riferimento foto/
+
+# `@secondi` sceglie da dove prendere una ripresa lunga
+python -m vedit apply templates/riferimento intro.jpg gita.mp4@45 tramonto.mp4@3
+```
+
+Il numero di slot lo decide la musica, e quasi mai coincide con quanti file hai:
+
+- **meno media che slot** → si ricomincia da capo, e `vedit` te lo dice. È quello
+  che fa chiunque monti un video da tre riprese su una canzone che ne chiederebbe
+  dodici, e produce comunque un montaggio guardabile.
+- **più media che slot** → gli ultimi restano fuori.
+- `--strict` trasforma entrambi in un errore, quando vuoi il numero esatto.
+
+**Un video più corto del suo slot viene rallentato** per arrivare in fondo, e
+`vedit` scrive di quanto. Il motivo è che il taglio successivo cade sul battito, e
+quel battito non si sposta per fare spazio a un video corto. Sotto `0.25x` il
+rallentatore diventa un fermo immagine, e allora è un errore.
+
+### Cambiare formato mentre applichi
+
+Il template ricorda il formato del riferimento, ma non te lo impone:
+
+```bash
+python -m vedit apply templates/riferimento media/ --size 1080x1920   # verticale
+python -m vedit apply templates/riferimento media/ --fps 60
+```
+
+### L'audio dei tuoi video
+
+Per impostazione predefinita **viene tolto**: la traccia del template è la traccia
+del montaggio, ed è il senso di un template audio. Con `--keep-audio` le due si
+sommano — serve quando nei tuoi video c'è qualcosa da sentire — e allora quasi
+sempre conviene abbassare la musica con `--volume 0.4`.
+
+### Lo schema di `template.yaml`
+
+| campo | | significato |
+|---|---|---|
+| `name` | | nome del template |
+| `duration` | | quanto dura il montaggio completo, cioè la traccia |
+| `audio.src` | | il file audio, dentro la cartella del template |
+| `audio.bpm` | | il tempo misurato, `0` se non riconosciuto |
+| `audio.offset` | | dove cade il primo battito |
+| `audio.volume`, `audio.fade_out` | | livello e dissolvenza in chiusura |
+| `format.size`, `format.fps` | | canvas del riferimento, sovrascrivibile con `--size`/`--fps` |
+| `slots[].at` | obbligatorio | istante in cui lo slot entra in scena |
+| `slots[].transition` | | durata della transizione in entrata |
+| `slots[].transition_type` | | `cut` (default) \| `crossfade` \| `fade_through_black` \| `slide` \| `wipe` |
+| `slots[].motion` | | movimento se in quello slot finisce una **foto** |
+| `slots[].amount` | | quanto movimento, in frazione |
+| `slots[].fit` | | `cover` (default) \| `contain` \| `stretch` |
+| `slots[].label` | | un nome per quel posto ("il ritornello") |
+
+**Uno slot non ha una durata.** Finisce quando comincia il successivo, e l'ultimo
+finisce con la traccia. Scriverla in due posti significherebbe poterla scrivere in
+due modi diversi — e allora quale delle due comanda? Le durate le vedi calcolate
+nei commenti che `extract` scrive accanto a ogni slot, e in `apply --check`.
+
+### Il template si corregge a mano
+
+È un file di testo, ed è pensato per essere aperto. Le cose che vale la pena
+cambiare, in ordine di frequenza:
+
+- **spostare un `at`**: sposta *quel* taglio e basta, nessun altro si muove;
+- **togliere un `motion`** che non ti convince su una foto;
+- **aggiungere una transizione**: `transition: 0.3` + `transition_type: crossfade`;
+- **dare un `label` agli slot** che riconosci ("apertura", "ritornello").
+
+### Limiti, onestamente
+
+Il rilevatore trova i **tagli netti**, che sono la stragrande maggioranza. Una
+dissolvenza lenta non produce nessun picco e viene ignorata; un flash o
+un'esplosione possono valere un falso taglio. Il rilevamento del tempo funziona su
+materiale con una cassa marcata e un tempo stabile — elettronica, pop, hip hop — e
+sbaglia su registrazioni dal vivo e brani acustici.
+
+Per questo `vedit shots` e `vedit beats` esistono come comandi a sé: si guarda cosa
+ha capito la macchina **prima** di costruirci sopra, e si regola `--sensitivity`.
+
+La traccia audio di un template resta di chi l'ha fatta: estrarla è comodo per
+lavorare, pubblicare è un altro discorso.
 
 ---
 
@@ -153,6 +361,9 @@ vedit/
   transitions.py   Registry delle transizioni: aggiungerne una è un file solo.
   motion.py        Registry dei movimenti sulle immagini (Ken Burns).
   beats.py         Tempo e battiti di una traccia audio (ffmpeg + numpy).
+  scenes.py        Dove stacca un video: i tagli, per istogrammi (ffmpeg + numpy).
+  templates.py     Template audio: slot, lettura del YAML, applicazione ai media.
+  extract.py       Da un video di riferimento a un template: mette d'accordo battiti e tagli.
   subtitles.py     Lettura dei file .srt. Solo testo, nessuna dipendenza.
   fonts.py         Trova un font utilizzabile e manda a capo il testo.
   proxies.py       Copie leggere dei sorgenti, con cache per impronta del file.
@@ -161,6 +372,7 @@ vedit/
   progress.py      La barra di avanzamento dell'export.
   ffmpeg_tools.py  Chiamate dirette a ffmpeg/ffprobe per le operazioni veloci.
   cli.py           Interfaccia da riga di comando.
+templates/         I template audio: un template.yaml e la sua traccia, per cartella.
 projects/demo/     Progetto di esempio, documentato campo per campo.
 examples/          Script didattici progressivi (leggili in ordine).
 docs/GLOSSARIO.md  I termini di montaggio, spiegati per programmatori.
@@ -314,9 +526,41 @@ Le regole, poche e verificate da `--check`:
 - il primo `at` è `0`, e gli istanti crescono;
 - l'ultimo segmento dichiara `end` o `duration`, perché non ha un taglio dopo di sé
   che lo chiuda;
-- niente transizioni **con sovrapposizione** (`crossfade`, `slide`, `wipe`): tirano
-  indietro il clip che entra, cioè spostano proprio l'istante che stai fissando.
-  `cut` e `fade_through_black` convivono benissimo.
+- una transizione non può durare più dello spazio fra i due istanti che collega: si
+  dissolve **da** qualcosa, e quel qualcosa deve essere già in scena.
+
+### Le dissolvenze non spostano gli istanti
+
+Una dissolvenza incrociata ha bisogno che il clip che entra cominci **prima** della
+fine del precedente, altrimenti non ha niente su cui dissolvere. Sembra
+incompatibile con `at`, che promette di non spostare niente. La conciliazione sta
+nel decidere cosa fissa l'istante:
+
+> `at` è il momento in cui il segmento **ha finito di entrare**.
+
+Il clip parte `transition` secondi prima e a `at` è completamente in scena. Il
+taglio resta dov'era — sul battito, se ce l'avevi messo — e la sovrapposizione se la
+mangia la coda del segmento precedente, che sotto continua a vedersi.
+
+```yaml
+timeline:
+  - {type: video, src: a.mp4, at: 0.0, start: 0}
+  - {type: video, src: b.mp4, at: 2.0, start: 0, transition: 0.4,
+     transition_type: crossfade}
+  - {type: video, src: c.mp4, at: 4.0, start: 0, end: 2.4, transition: 0.4,
+     transition_type: crossfade}
+```
+
+Il secondo segmento entra a `1.6`, è pieno a `2.0`, e occupa fino a `4.0`: di
+sorgente ne consuma `2.4` secondi invece di `2`. È la differenza pratica fra i due
+modi — **a durate** ogni sovrapposizione anticipa tutto quello che viene dopo, e i
+tagli che erano sul battito non ci sono più; **a istanti** restano dove li hai
+messi.
+
+Un dettaglio dell'ultimo segmento, che non ha un taglio dopo di sé: quello che
+dichiara (`end - start`, oppure `duration`) è quanto **mostra**, e la dissolvenza in
+entrata se ne mangia una parte. Nell'esempio sopra `c.mp4` mostra 2.4 secondi, 0.4
+dei quali passano a entrare: il montaggio finisce a `6.0`.
 
 ### Montare a tempo di musica
 
