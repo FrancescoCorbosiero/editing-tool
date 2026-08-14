@@ -18,7 +18,13 @@ from pathlib import Path
 from . import transitions
 from .ffmpeg_tools import FFmpegError, probe
 from .models import Project, Segment
-from .timeline import Placement, clamp_overlap, durations_from_positions, plan
+from .timeline import (
+    Placement,
+    clamp_overlap,
+    effective_overlaps,
+    plan,
+    plan_anchored,
+)
 from .transitions import TransitionRequest
 
 
@@ -154,22 +160,35 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
                 "muoverebbe anche le bande nere)"
             )
 
-    # Montaggio a istanti: le durate vengono dai tagli dichiarati, non dai
-    # segmenti. Stesso calcolo del builder, altrimenti il riepilogo mentirebbe.
+    # Stesso calcolo del builder: la sovrapposizione la chiedono solo i tipi che
+    # ne hanno bisogno (vedi transitions.py).
+    richieste = [r.duration for r in requests]
     positions = project.cut_positions()
+
     if positions is not None:
-        coda = durations[-1] if durations else 0.0
-        durations = durations_from_positions(positions, coda)
-
-    # Stesso calcolo del builder: la durata effettiva vale per tutti i tipi,
-    # la sovrapposizione solo per quelli che la usano (vedi transitions.py).
-    effective = [0.0] * len(durations)
-    overlaps = [0.0] * len(durations)
-    for i in range(1, len(durations)):
-        effective[i] = clamp_overlap(requests[i].duration, durations[i - 1], durations[i])
-        overlaps[i] = effective[i] if transitions.get(requests[i].type).overlaps else 0.0
-
-    placements = plan(durations, overlaps)
+        # Montaggio a istanti: le durate vengono dai tagli dichiarati, non dai
+        # segmenti, e il segmento entra in anticipo senza spostare il taglio.
+        # Stessa funzione del builder, altrimenti il riepilogo mentirebbe.
+        sovrapposte = [
+            valore if transitions.get(requests[i].type).overlaps else 0.0
+            for i, valore in enumerate(richieste)
+        ]
+        placements = plan_anchored(positions, durations[-1] if durations else 0.0, sovrapposte)
+        durations = [p.duration for p in placements]
+        # La riduzione l'ha decisa plan_anchored: si rilegge da li'.
+        effective = [p.overlap for p in placements]
+        for i, request in enumerate(requests):
+            if not transitions.get(request.type).overlaps:
+                effective[i] = 0.0 if i == 0 else clamp_overlap(
+                    request.duration, durations[i - 1], durations[i]
+                )
+    else:
+        effective = effective_overlaps(richieste, durations)
+        overlaps = [
+            valore if transitions.get(requests[i].type).overlaps else 0.0
+            for i, valore in enumerate(effective)
+        ]
+        placements = plan(durations, overlaps)
 
     rows = zip(project.timeline, placements, infos, strict=True)
     for i, (seg, place, info) in enumerate(rows):

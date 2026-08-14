@@ -638,17 +638,26 @@ class Project:
                 "chiude il taglio successivo, lui no"
             )
 
-        # Le transizioni che sovrappongono i clip sposterebbero i clip nel tempo,
-        # cioe' proprio la cosa che `at` serve a fissare.
+        # Le transizioni che sovrappongono i clip convivono con `at`, ma solo
+        # perche' in questo modo il clip che entra viene tirato indietro e non
+        # in avanti (vedi timeline.plan_anchored): l'istante dichiarato e' il
+        # momento in cui la transizione ha FINITO di entrare. Resta un limite
+        # fisico - una dissolvenza non puo' cominciare prima del taglio
+        # precedente - e chi scrive il YAML se lo merita scritto, non troncato
+        # in silenzio.
         for i, seg in enumerate(self.timeline):
             if i == 0:
                 continue
             request = seg.transition_request(self.defaults)
-            if request.duration > 0 and transition_overlaps(request.type):
+            if request.duration <= 0 or not transition_overlaps(request.type):
+                continue
+            spazio = declared[i] - declared[i - 1]
+            if request.duration > spazio:
                 raise ConfigError(
-                    f"timeline[{i}]: la transizione '{request.type}' sovrappone i clip "
-                    "e non si combina con 'at', che fissa gli istanti. Usa "
-                    "transition_type: cut oppure fade_through_black, che non spostano niente"
+                    f"timeline[{i}]: la transizione '{request.type}' dura "
+                    f"{request.duration:g}s ma fra questo taglio e il precedente ci sono "
+                    f"{spazio:g}s. Una dissolvenza non puo' cominciare prima del clip "
+                    "da cui dissolve: accorciala, o allontana i due istanti"
                 )
 
     def scale(self, factor: float) -> None:

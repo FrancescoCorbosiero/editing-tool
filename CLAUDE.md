@@ -9,6 +9,17 @@ codice la traduce in clip MoviePy e la esporta. L'utente **non conosce i softwar
 editing** e sta imparando il dominio attraverso questo codice: la leggibilità e i
 commenti esplicativi contano quanto la correttezza.
 
+Sopra al montaggio dichiarativo c'è il livello che lo rende produttivo: i **template
+audio**. Da un video di riferimento si estrae la sua struttura (traccia audio,
+tempo, istanti dei tagli, formato) e la si riapplica a media diversi. Il flusso di
+lavoro vero è `extract` una volta, `apply` tante.
+
+Il vincolo che tiene onesto quel livello: **un template genera un `timeline.yaml`,
+non è un secondo motore di montaggio**. Tutto quello che `apply` produce deve poter
+essere scritto a mano, salvato con `--to-yaml` e renderizzato da `vedit render`. Se
+una funzionalità dei template non è esprimibile come progetto, il problema è la
+funzionalità.
+
 ## Vincolo critico: MoviePy 2.x
 
 Il repo usa MoviePy **2.x**, la cui API è incompatibile con la 1.x. Il tuo training
@@ -47,6 +58,16 @@ Senza MoviePy:
   importa questo modulo per validare i nomi. Non spostare quegli import in cima.
 - **`vedit/motion.py`** — registry dei movimenti sulle immagini (Ken Burns), stessa
   regola sugli import di `transitions.py`.
+- **`vedit/beats.py`** — tempo e battiti di una traccia audio, per montare a tempo
+  di musica. Chiama ffmpeg e fa i conti con numpy.
+- **`vedit/scenes.py`** — dove stacca un video: i tagli, per differenza di
+  istogrammi. Il gemello di `beats.py`, stessa filosofia (ffmpeg + numpy, nessuna
+  libreria di visione artificiale, limiti dichiarati nel docstring).
+- **`vedit/templates.py`** — i template audio: `Slot`, `Template`, e `bind()`, che
+  produce il **dizionario di un progetto**. Non importa il builder: costruisce dati
+  che `Project.from_dict` sa leggere.
+- **`vedit/extract.py`** — orchestrazione dell'estrazione: chiama `beats` e `scenes`,
+  allinea i tagli al battito, scrive il `template.yaml`.
 - **`vedit/subtitles.py`** — parsing dei `.srt`. Solo manipolazione di testo.
 - **`vedit/proxies.py`** — copie leggere dei sorgenti, con cache basata sull'impronta
   del file. Chiama ffmpeg, non MoviePy.
@@ -67,7 +88,27 @@ Ogni nuova funzionalità dichiarativa richiede tre modifiche coordinate:
 2. la traduzione in `builder.py`
 3. la riga nella tabella dello schema in `README.md`
 
+Se il campo deve essere anche riusabile da un template, le modifiche diventano
+cinque: il campo in `Slot` (`templates.py`), la sua scrittura in `bind()`, e la riga
+nella tabella dello schema del template. Se lo deve dedurre `extract`, anche lì.
+
 Se introduce un termine di montaggio nuovo, aggiungilo anche a `docs/GLOSSARIO.md`.
+
+### La matematica delle posizioni sta in un posto solo
+
+`timeline.py` ha due funzioni di piazzamento, e la differenza è il cuore del
+montaggio a tempo:
+
+- **`plan()`** — a durate: ogni segmento parte dove finisce il precedente, e una
+  sovrapposizione **accorcia** il montaggio anticipando tutto quello che viene dopo.
+- **`plan_anchored()`** — a istanti (`at`): le posizioni sono fissate, e il segmento
+  che entra in dissolvenza parte in anticipo senza spostare nessun taglio. `at` è il
+  momento in cui il segmento ha **finito** di entrare.
+
+`builder.py` e `report.py` chiamano entrambe le stesse funzioni, e la riduzione
+delle transizioni troppo lunghe la decide **solo** `plan_anchored`, che la restituisce
+in `Placement.overlap`. Non ricalcolarla altrove: `--check` e il render mostrerebbero
+numeri diversi, ed è esattamente il bug che quel modulo esiste per prevenire.
 
 ## Convenzioni
 
@@ -106,6 +147,9 @@ Prima di dichiarare completo un lavoro:
 1. `pytest -q` verde
 2. `python -m vedit render projects/demo/timeline.yaml --dry-run` senza errori
 3. per modifiche al rendering, un render `--preview` reale e la verifica del risultato
+4. per modifiche ai template, il giro completo su un video sintetico:
+   `extract` → `apply --check` → `apply` → verifica che i tagli del video prodotto
+   cadano sugli `at` del template (vedi sotto)
 
 ## Verifica del risultato di un render
 
@@ -123,6 +167,25 @@ v.close()
 
 Durante un crossfade il colore medio deve variare **gradualmente** fra i due
 segmenti; se salta di colpo, la sovrapposizione non sta funzionando.
+
+Per un template la verifica è più precisa, perché c'è un valore atteso: **i tagli
+devono cadere sugli `at`**. Si applica il template a tinte unite — un colore per
+slot — e si guarda il fotogramma prima e dopo ogni istante dichiarato:
+
+```python
+import yaml, numpy as np
+from moviepy import VideoFileClip
+
+istanti = [s["at"] for s in yaml.safe_load(open("templates/x/template.yaml"))["slots"]]
+v = VideoFileClip("output/prova.mp4")
+for at in istanti[1:]:
+    prima, dopo = v.get_frame(at - 0.05), v.get_frame(at + 0.05)
+    assert np.abs(prima.mean(axis=(0, 1)) - dopo.mean(axis=(0, 1))).max() > 20, at
+v.close()
+```
+
+Con una dissolvenza il colore a `at` deve essere **già quello nuovo**: la
+dissolvenza si chiude sull'istante, non ci passa in mezzo.
 
 ## Trappole già incontrate
 

@@ -74,6 +74,16 @@ un intervallo che punta al file.
 **Segmento** — il nome che questo repo dà a una voce della timeline, per non
 confonderla con il clip MoviePy che ne nasce.
 
+**Inquadratura** (*shot*) — un pezzo di video girato senza interruzioni, cioè quello
+che sta fra due tagli. Nel materiale già montato che analizzi è l'unità che il
+rilevatore cerca (`vedit shots`); nel montaggio che stai scrivendo corrisponde a un
+segmento.
+
+**Ritmo del montaggio** — ogni quanto si stacca. Non è una preferenza estetica: la
+durata media delle inquadrature è la cosa che lo spettatore percepisce come
+"energia" del video. Sotto il secondo è un montaggio nervoso da social, sopra i
+cinque è un documentario.
+
 **Taglio IN / OUT** (*in point*, *out point*) — dove comincia e dove finisce la
 porzione che prendi **dal sorgente**. In `vedit` sono `start` e `end`, e sono nel
 tempo del *file*, non della timeline: `start: 40` significa "dal minuto 0:40 del
@@ -177,6 +187,41 @@ sulla musica si sente come un errore; mezzo secondo di dissolvenza no.
 
 **Voce fuori campo** (*voice-over*) — commento parlato registrato a parte, non
 proveniente dalla scena.
+
+**Battito** (*beat*) — il colpo regolare su cui batti il piede. **BPM** (*beats per
+minute*) è quanti ne passano in un minuto: 120 BPM significa un battito ogni mezzo
+secondo. Montare "a tempo" vuol dire far cadere i cambi di scena su quei momenti;
+quando succede, il pubblico li sente arrivare e il video "gira".
+
+**Levare** (*off-beat*, *upbeat*) — a metà fra due battiti. Molta musica ballabile ha
+metà dei suoi colpi lì, ed è il motivo per cui un montaggio può stare a tempo anche
+staccando fra un battito e l'altro: non è un errore, è una scelta.
+
+**Quantizzare** — spostare qualcosa sulla griglia del tempo più vicina. È un termine
+preso dai sequencer musicali, dove la stessa operazione rimette in riga una battuta
+suonata a mano. In `vedit` lo fa `extract` con i tagli che trova, e lo fa in modo
+prudente: solo se erano già vicini al battito.
+
+---
+
+## Template
+
+**Template audio** — un montaggio riutilizzabile: la traccia musicale, il tempo, gli
+istanti dei tagli e il formato, senza i media. È l'idea che su CapCut trovi come
+"riusare un suono": non prendi in prestito una canzone, prendi in prestito un
+montaggio che su quella canzone funziona. Si estrae da un video di riferimento e si
+applica ai propri file.
+
+**Slot** — un posto nel montaggio descritto da un template: comincia a un istante
+preciso e finisce quando comincia il successivo. Non sa cosa ci finirà dentro — un
+video, una foto — sa solo quando comincia, come entra in scena e, se capitasse una
+foto, come muoverla.
+
+**Rilevamento dei tagli** (*shot detection*) — capire da un video già montato dove
+sono stati fatti gli stacchi. `vedit` confronta gli **istogrammi** dei fotogrammi
+consecutivi (quanti pixel di ogni colore) invece dei pixel uno per uno: se la camera
+si muove i pixel cambiano posizione ma le quantità restano, mentre a un taglio
+cambia tutto. È la differenza fra riconoscere uno stacco e riconoscere un movimento.
 
 ---
 

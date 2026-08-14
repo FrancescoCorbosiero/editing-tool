@@ -100,13 +100,14 @@ def test_istante_negativo():
         Project.from_dict({"timeline": [{"type": "color", "at": -1, "duration": 1}]})
 
 
-def test_le_transizioni_sovrapposte_non_convivono_con_gli_istanti():
+def test_una_dissolvenza_non_puo_partire_prima_del_taglio_precedente():
     """
-    Un crossfade tira indietro il clip che entra: sposterebbe proprio l'istante
-    che `at` serve a fissare. Meglio un errore chiaro che un montaggio storto.
+    Il limite fisico: si dissolve DA qualcosa, e quel qualcosa deve essere in
+    scena. Una dissolvenza piu' lunga dello spazio fra i due istanti comincerebbe
+    prima che esista il clip da cui dissolvere.
     """
-    with pytest.raises(ConfigError, match="sovrappone"):
-        progetto([0.0, 1.0], defaults={"transition": 0.5,
+    with pytest.raises(ConfigError, match="non puo' cominciare prima"):
+        progetto([0.0, 0.4], defaults={"transition": 0.9,
                                        "transition_type": "crossfade"}).validate_positions()
 
 
@@ -115,6 +116,111 @@ def test_le_transizioni_che_non_sovrappongono_vanno_bene():
                                    "transition_type": "fade_through_black"}).validate_positions()
     progetto([0.0, 1.0], defaults={"transition": 0.4,
                                    "transition_type": "cut"}).validate_positions()
+
+
+# -- dissolvenze senza perdere il tempo di musica ---------------------------
+
+def test_una_dissolvenza_non_sposta_gli_istanti():
+    """
+    Il punto di tutto il montaggio a tempo: mettere un crossfade su un taglio
+    che cade sul battito non deve spostare quel taglio (ne' i successivi).
+    Il clip che entra parte in ANTICIPO, e a `at` e' completamente in scena.
+    """
+    secco = progetto([0.0, 1.0, 2.0], defaults={"transition_type": "cut"})
+    dissolto = progetto([0.0, 1.0, 2.0], defaults={"transition": 0.4,
+                                                   "transition_type": "crossfade"})
+
+    from vedit.report import analyze
+
+    tagli_secchi = [round(r.placement.start, 4) for r in analyze(secco).rows]
+    righe = analyze(dissolto).rows
+
+    assert tagli_secchi == [0.0, 1.0, 2.0]
+    # I clip partono prima, ma l'istante dichiarato non si e' mosso di un frame:
+    # e' li' che la dissolvenza finisce di entrare.
+    assert [round(r.placement.start, 4) for r in righe] == [0.0, 0.6, 1.6]
+    # L'ultimo mostra il secondo che ha dichiarato, 0.4 dei quali se ne vanno
+    # nell'entrata: finisce quindi a 2.6, non a 3.
+    assert [round(r.placement.end, 4) for r in righe] == [1.0, 2.0, 2.6]
+
+
+def test_a_durate_lo_stesso_progetto_perderebbe_il_tempo():
+    """
+    Il confronto che spiega perche' esistono due modi di posizionare.
+
+    Stessi tre segmenti, stessa dissolvenza. A durate ogni sovrapposizione
+    ANTICIPA tutto quello che viene dopo, e i tagli che erano sul battito non ci
+    sono piu'; a istanti restano dove sono stati messi.
+    """
+    from vedit.report import analyze
+
+    istanti = progetto([0.0, 1.0, 2.0],
+                       defaults={"transition": 0.4, "transition_type": "crossfade"})
+
+    a_durate = Project.from_dict({
+        "output": {"size": [160, 90], "fps": 10},
+        "defaults": {"transition": 0.4, "transition_type": "crossfade"},
+        "timeline": [{"type": "color", "duration": 1.0} for _ in range(3)],
+    })
+
+    tagli_a_istanti = [round(r.placement.start, 4) for r in analyze(istanti).rows]
+    tagli_a_durate = [round(r.placement.start, 4) for r in analyze(a_durate).rows]
+
+    assert tagli_a_istanti == [0.0, 0.6, 1.6]
+    assert tagli_a_durate == [0.0, 0.6, 1.2]     # il terzo taglio si e' spostato
+
+
+def test_la_dissolvenza_non_sposta_i_tagli_nemmeno_nel_montaggio_vero():
+    """Il riepilogo lo dice; qui si controlla che il render faccia lo stesso."""
+    dissolto = progetto([0.0, 1.0, 2.0], ultima_durata=1.0,
+                        defaults={"transition": 0.4, "transition_type": "crossfade"})
+    clip = build(dissolto)
+    try:
+        assert [round(c.start, 4) for c in clip.clips] == [0.0, 0.6, 1.6]
+        assert clip.duration == pytest.approx(2.6)
+    finally:
+        close_all()
+
+
+def test_il_clip_che_entra_prende_piu_sorgente(tmp_path):
+    """
+    Entrare in anticipo significa avere bisogno di piu' materiale: il segmento
+    possiede un secondo di montaggio ma con 0.4s di dissolvenza ne deve mostrare
+    1.4, altrimenti l'ultimo pezzo resterebbe scoperto.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("serve ffmpeg")
+
+    sorgente = tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                    "-i", "testsrc=size=160x90:rate=10:duration=6",
+                    "-pix_fmt", "yuv420p", str(sorgente)], check=True)
+
+    project = Project.from_dict({
+        "output": {"size": [160, 90], "fps": 10},
+        "defaults": {"transition": 0.4, "transition_type": "crossfade"},
+        "timeline": [
+            {"type": "video", "at": 0.0, "src": str(sorgente), "start": 0.0},
+            # Nessun `end`: quanto sorgente serve lo decide il montaggio.
+            {"type": "video", "at": 1.0, "src": str(sorgente), "start": 3.0},
+            {"type": "video", "at": 2.0, "src": str(sorgente), "start": 0.0, "end": 1.0},
+        ],
+    })
+    project.root = tmp_path
+
+    clip = build(project)
+    try:
+        # Possiede un secondo (da 1.0 a 2.0) ma ne mostra 1.4: 0.4 di anticipo.
+        assert clip.clips[1].duration == pytest.approx(1.4, abs=0.05)
+        assert clip.clips[1].start == pytest.approx(0.6, abs=0.001)
+        # L'ultimo ha un solo secondo di sorgente (0 -> 1) e 0.4 se ne vanno
+        # nell'entrata: il montaggio finisce a 2.6.
+        assert clip.duration == pytest.approx(2.6, abs=0.05)
+    finally:
+        close_all()
 
 
 # -- il taglio nel sorgente -------------------------------------------------
