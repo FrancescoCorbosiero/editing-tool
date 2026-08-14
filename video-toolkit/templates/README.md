@@ -57,3 +57,33 @@ un formato diverso da 2:1 conviene applicarlo con `--size`:
 ```bash
 python -m vedit apply templates/riferimento media/ --size 1080x1920 --preview
 ```
+
+---
+
+## `panzerknacker`
+
+L'opposto del precedente: un video divulgativo con voce fuori campo, dieci
+inquadrature lunghe quasi due secondi l'una.
+
+| | |
+|---|---|
+| durata | 19.20s |
+| tempo | 119.5 BPM (ma vedi sotto) |
+| slot | 10 |
+| formato | 1280×720 @ 30 fps |
+| transizioni | stacchi netti |
+
+Estratto con **`--grid off`**, cioe' senza riallineare i tagli al battito, ed e' una
+decisione che vale la pena spiegare perche' e' il caso in cui la regola generale non
+si applica. Il BPM viene rilevato, ma solo quattro tagli su nove ci cadono sopra: qui
+il montaggio non segue la musica, segue **il discorso**. Quei tagli appartengono a
+quella voce, e spostarli sulla griglia li avrebbe staccati da cio' che li motiva.
+
+La regola che se ne ricava: prima di estrarre, `vedit beats` sul riferimento. Se
+avvisa che i colpi sono fuori griglia, il video probabilmente e' parlato, e la
+griglia va spenta.
+
+**Quello che questo template NON si porta dietro** sono le scritte a schermo, che nel
+video originale sono meta' del suo carattere. Riempirne gli slot da' il ritmo e la
+voce, non i cartelli: quelli si aggiungono a mano come `overlays` nel progetto
+generato con `--to-yaml`.

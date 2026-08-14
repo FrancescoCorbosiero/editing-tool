@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# TEMPLATE AUDIO: panzerknacker
+#
+# Un montaggio riutilizzabile. La musica e gli istanti dei tagli sono fissi,
+# i media no: quelli li porti tu.
+#
+#   python -m vedit apply <questa cartella> foto1.jpg riprese.mp4 ... --preview
+#
+# `at` e' l'istante in cui uno slot entra in scena, misurato sulla traccia
+# audio qui sotto. Uno slot finisce quando comincia il successivo, e l'ultimo
+# finisce con la traccia: le durate non si scrivono, si deducono.
+# ---------------------------------------------------------------------------
+
+name: panzerknacker
+duration: 19.2            # quanto dura il montaggio completo
+
+audio:
+  src: audio.m4a          # la traccia, che vive dentro questa cartella
+  bpm: 119.5              # un battito ogni 0.502s
+  offset: 0.29            # dove cade il primo battito
+  volume: 1               # 1 = com'e', 0.5 = a meta'
+  fade_out: 0             # dissolvenza audio in chiusura
+
+format:
+  size: [1280, 720]       # si puo' cambiare quando lo applichi: --size 1080x1920
+  fps: 30
+
+source:                 # da dove e' stato estratto: solo memoria
+  file: panzerknacker.mp4
+  duration: 19.2
+  extracted: 2026-08-14
+
+# ---------------------------------------------------------------------------
+# SLOT: 10 posti da riempire, in quest'ordine.
+#
+# motion vale solo se in quello slot finisce una FOTO (un video si muove
+# gia' per conto suo). Toglilo, o cambialo, se non ti convince.
+# ---------------------------------------------------------------------------
+slots:
+  - at: 0.0               #  1)  dura 1.20s, 2.39 battiti
+    motion: zoom_in
+    amount: 0.06
+  - at: 1.2               #  2)  dura 0.87s, 1.73 battiti
+    motion: zoom_out
+    amount: 0.05
+  - at: 2.067             #  3)  dura 2.00s, 3.98 battiti
+    motion: pan_left
+    amount: 0.1
+  - at: 4.067             #  4)  dura 1.17s, 2.32 battiti
+    motion: zoom_out
+    amount: 0.058
+  - at: 5.233             #  5)  dura 1.50s, 2.99 battiti
+    motion: zoom_in
+    amount: 0.075
+  - at: 6.733             #  6)  dura 4.07s, 8.10 battiti
+    motion: zoom_out
+    amount: 0.203
+  - at: 10.8              #  7)  dura 2.50s, 4.98 battiti
+    motion: pan_up
+    amount: 0.125
+  - at: 13.3              #  8)  dura 1.43s, 2.85 battiti
+    motion: zoom_out
+    amount: 0.072
+  - at: 14.733            #  9)  dura 2.77s, 5.51 battiti
+    motion: zoom_in
+    amount: 0.138
+  - at: 17.5              # 10)  dura 1.70s, 3.39 battiti
+    motion: zoom_out
+    amount: 0.085
