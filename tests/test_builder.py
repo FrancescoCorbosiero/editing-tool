@@ -67,3 +67,66 @@ def test_ctrl_c_rimuove_il_file_parziale_e_i_temporanei(tmp_path):
 
 def test_rimuovere_un_file_inesistente_non_e_un_errore(tmp_path):
     assert discard_partial(tmp_path / "mai-creato.mp4") == []
+
+
+# -- foto ferme composte una volta sola --------------------------------------
+
+def foto_su_disco(tmp_path, size=(400, 200), colore=(200, 40, 40), orientamento=None):
+    from PIL import Image
+
+    path = tmp_path / "foto.jpg"
+    image = Image.new("RGB", size, colore)
+    if orientamento:
+        exif = Image.Exif()
+        exif[0x0112] = orientamento          # il tag "Orientation" delle fotocamere
+        image.save(path, exif=exif)
+    else:
+        image.save(path)
+    return path
+
+
+def test_contain_mette_la_foto_intera_fra_due_bande(tmp_path):
+    from vedit.builder import still_on_canvas
+
+    frame = still_on_canvas(foto_su_disco(tmp_path), (200, 400), "contain", (0, 0, 0))
+    assert frame.shape == (400, 200, 3)
+    assert frame[10, 100].tolist() == [0, 0, 0]              # banda sopra
+    assert frame[200, 100, 0] > 150                          # la foto al centro
+
+
+def test_cover_riempie_tagliando_i_bordi(tmp_path):
+    from vedit.builder import still_on_canvas
+
+    frame = still_on_canvas(foto_su_disco(tmp_path), (200, 400), "cover", (0, 0, 0))
+    assert frame.shape == (400, 200, 3)
+    assert frame[:, :, 0].min() > 150                        # nessuna banda
+
+
+def test_le_foto_ruotate_dal_telefono_si_raddrizzano(tmp_path):
+    """
+    Una foto scattata in verticale spesso e' salvata orizzontale con l'ordine
+    di ruotarla nei metadati: mostrata cosi' com'e' verrebbe di lato.
+    """
+    from vedit.builder import still_on_canvas
+
+    # 400x200 con "ruota di 90 gradi": in realta' e' una foto verticale 200x400
+    path = foto_su_disco(tmp_path, size=(400, 200), orientamento=6)
+    frame = still_on_canvas(path, (400, 400), "contain", (0, 0, 0))
+    assert frame[200, 10].tolist() == [0, 0, 0]              # bande ai lati, non sopra
+    assert frame[10, 200, 0] > 150
+
+
+def test_una_foto_ferma_diventa_un_clip_della_misura_del_canvas(tmp_path):
+    from vedit.builder import build_segment, close_all
+
+    project = Project.from_dict({
+        "output": {"size": [200, 400]},
+        "timeline": [{"type": "image", "src": str(foto_su_disco(tmp_path)),
+                      "duration": 1, "fit": "contain"}],
+    })
+    try:
+        clip = build_segment(project.timeline[0], project)
+        assert tuple(clip.size) == (200, 400)
+        assert clip.duration == 1
+    finally:
+        close_all()

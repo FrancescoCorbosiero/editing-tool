@@ -87,6 +87,56 @@ def fit_clip(clip, size: tuple[int, int], mode: str):
     return clip
 
 
+def load_still(path: Path):
+    """
+    Una foto come array RGBA, raddrizzata.
+
+    Le foto dei telefoni sono spesso salvate "di lato", con un'etichetta EXIF
+    che dice di quanto ruotarle: chi le guarda in galleria non se ne accorge,
+    ma chi legge i pixel cosi' come sono le mostra storte. `exif_transpose`
+    applica la rotazione una volta per tutte.
+    """
+    from PIL import Image, ImageOps
+
+    with Image.open(path) as image:
+        return ImageOps.exif_transpose(image).convert("RGBA")
+
+
+def still_on_canvas(path: Path, size: tuple[int, int], mode: str,
+                    background: tuple[int, int, int]):
+    """
+    Una foto ferma gia' adattata al canvas: un fotogramma solo, calcolato una volta.
+
+    Passare da fit_clip + place_on_canvas darebbe lo stesso risultato, ma
+    ricomporrebbe la foto sullo sfondo a ogni fotogramma: trenta volte al
+    secondo lo stesso lavoro, per un'immagine che non cambia. Qui la si
+    prepara una volta con Pillow e il clip non deve fare altro che restituirla.
+    Le regole sono quelle di fit_clip: `contain` intera con le bande,
+    `cover` a tutto schermo tagliando al centro, `stretch` deformata.
+    """
+    import numpy as np
+    from PIL import Image
+
+    image = load_still(path)
+    width, height = size
+    if mode == "stretch":
+        image = image.resize((width, height), Image.LANCZOS)
+    else:
+        scala = (min if mode == "contain" else max)(width / image.width, height / image.height)
+        image = image.resize((max(1, round(image.width * scala)),
+                              max(1, round(image.height * scala))), Image.LANCZOS)
+    if image.width > width or image.height > height:
+        # cover: si tiene il centro, come il Crop di fit_clip
+        left, top = (image.width - width) // 2, (image.height - height) // 2
+        image = image.crop((max(left, 0), max(top, 0),
+                            max(left, 0) + min(width, image.width),
+                            max(top, 0) + min(height, image.height)))
+
+    canvas = Image.new("RGBA", size, (*background, 255))
+    canvas.alpha_composite(image, ((width - image.width) // 2, (height - image.height) // 2))
+    return np.asarray(canvas.convert("RGB"))
+
+
 def place_on_canvas(clip, size: tuple[int, int], background: tuple[int, int, int]):
     """
     Centra il clip su uno sfondo delle dimensioni esatte del canvas.
@@ -160,14 +210,19 @@ def build_segment(seg: Segment, project: Project, target: float | None = None):
         if not path.exists():
             raise FileNotFoundError(f"Immagine non trovata: {path}")
         duration = target or seg.duration or project.defaults.image_duration
-        clip = ImageClip(str(path)).with_duration(duration)
 
         if seg.motion:
             # Il movimento adatta l'immagine da solo: deve ingrandirla oltre il
             # canvas per avere spazio su cui muoversi, quindi salta fit_clip e
             # place_on_canvas e restituisce gia' un clip delle misure giuste.
+            import numpy as np
+
+            clip = ImageClip(np.asarray(load_still(path).convert("RGB"))).with_duration(duration)
             ctx = MotionContext(amount=seg.amount, size=size, duration=duration)
             return motion.get(seg.motion).apply(clip, ctx)
+
+        frame = still_on_canvas(path, size, fit_mode, project.output.background)
+        return ImageClip(frame).with_duration(duration)
 
     elif seg.type == "color":
         clip = ColorClip(size=size, color=seg.color, duration=target or seg.duration)

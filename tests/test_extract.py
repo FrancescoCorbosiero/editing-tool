@@ -387,7 +387,7 @@ def test_il_template_scritto_e_commentato(tmp_path):
     testo = (tmp_path / "tpl" / "template.yaml").read_text(encoding="utf-8")
     assert "TEMPLATE AUDIO" in testo
     assert "battiti" in testo
-    assert "vedit apply" in testo
+    assert "vedit new" in testo
     # E deve restare YAML valido, non solo bello da leggere.
     assert render(result.template) is not None
 
