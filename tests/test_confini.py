@@ -14,7 +14,7 @@ RADICE = Path(__file__).resolve().parent.parent   # la cartella che contiene ved
 
 MODULI_LEGGERI = ["vedit.models", "vedit.timeline", "vedit.transitions",
                   "vedit.report", "vedit.ffmpeg_tools", "vedit.beats",
-                  "vedit.fonts", "vedit.motion",
+                  "vedit.fonts", "vedit.text", "vedit.motion",
                   "vedit.scenes", "vedit.templates", "vedit.extract"]
 
 

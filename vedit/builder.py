@@ -23,17 +23,16 @@ from moviepy import (
     ColorClip,
     CompositeVideoClip,
     ImageClip,
-    TextClip,
     VideoFileClip,
     afx,
     vfx,
 )
 
 from . import motion, transitions
-from .fonts import find_font, font_error_message, wrap_text
-from .models import AudioSpec, ConfigError, Overlay, Project, Segment, TextStyle
+from .models import AudioSpec, Overlay, Project, Segment, TextStyle
 from .motion import MotionContext
 from .progress import RenderProgress, format_duration
+from .text import render_text
 from .timeline import (
     clamp_overlap,
     effective_overlaps,
@@ -242,59 +241,17 @@ def concat_with_transitions(clips: list, requests: list[TransitionRequest],
 # Overlay
 # --------------------------------------------------------------------------
 
-def resolve_background(style: TextStyle):
-    """
-    Traduce `bg_color` + `bg_opacity` nel colore RGBA che vuole Pillow.
-
-    Uno sfondo semitrasparente e' il modo piu' affidabile di rendere leggibile
-    del testo su un'immagine qualsiasi: il contorno aiuta, ma su uno sfondo
-    molto mosso solo un rettangolo uniforme garantisce il contrasto.
-    """
-    if style.bg_color is None:
-        return None
-    from PIL import ImageColor
-
-    color = style.bg_color
-    rgb = tuple(ImageColor.getrgb(color)[:3]) if isinstance(color, str) else tuple(color)[:3]
-    return (*rgb, round(255 * style.bg_opacity))
-
-
 def make_text_clip(text: str, style: TextStyle, canvas_width: int, duration: float,
                    root: Path | None = None):
     """
-    Costruisce un clip di testo: font, contorno, sfondo, a capo, allineamento.
+    Un clip di testo: font, contorno, sfondo, a capo, allineamento.
 
-    Sul metodo: si usa sempre `label`, che disegna il testo cosi' com'e' e
-    produce un'immagine grande esattamente quanto serve. L'andata a capo la
-    calcoliamo noi (fonts.wrap_text) invece di usare il `caption` di MoviePy,
-    per due motivi: quello di MoviePy spezza dentro le parole, e restituisce
-    comunque un'immagine larga quanto il massimo consentito, il che con uno
-    sfondo semitrasparente significa un rettangolo mezzo vuoto sullo schermo.
+    Il disegno lo fa text.py con Pillow, non il TextClip di MoviePy: il perche'
+    e' scritto la'. Qui l'immagine RGBA diventa un clip, e il suo canale alfa
+    la maschera che lo rende trasparente attorno alle lettere.
     """
-    font = find_font(style.font, root)
-    if font is None:
-        raise ConfigError(font_error_message(style.font))
-
-    wrap = style.wrap_width(canvas_width)
-    if wrap is not None:
-        text = wrap_text(text, font, style.font_size, wrap, style.stroke_width)
-
-    padding = style.padding
-    common = {
-        "font": str(font),
-        "font_size": style.font_size,
-        "color": style.color,
-        "stroke_color": style.stroke_color,
-        "stroke_width": style.stroke_width,
-        "bg_color": resolve_background(style),
-        "text_align": style.align,
-        # Il margine e' anche il riempimento dello sfondo: senza, il rettangolo
-        # semitrasparente tocca le lettere e si legge peggio.
-        "margin": (padding, padding) if padding else (None, None),
-        "duration": duration,
-    }
-
-    return TextClip(text=text, method="label", **common)
+    rgba = render_text(text, style, canvas_width, root)
+    return ImageClip(rgba, transparent=True).with_duration(duration)
 
 
 def build_overlay(ov: Overlay, project: Project, video_duration: float):

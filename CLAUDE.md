@@ -69,6 +69,8 @@ Senza MoviePy:
 - **`vedit/extract.py`** — orchestrazione dell'estrazione: chiama `beats` e `scenes`,
   allinea i tagli al battito, scrive il `template.yaml`.
 - **`vedit/fonts.py`** — ricerca dei font e a capo del testo (usa Pillow, non MoviePy).
+- **`vedit/text.py`** — disegna il testo in un'immagine RGBA con Pillow; il builder
+  la trasforma in un clip.
 - **`vedit/report.py`** — il riepilogo di `render --check`. Legge i metadati con ffprobe.
 - **`vedit/ffmpeg_tools.py`** — subprocess verso ffprobe. Nessun MoviePy.
 
@@ -193,10 +195,10 @@ dissolvenza si chiude sull'istante, non ci passa in mezzo.
   directory. Usa sempre `project.resolve(path)`.
 - Con `pix_fmt` diverso da `yuv420p` il video non si apre su molti player. È già
   forzato negli `ffmpeg_params`.
-- `TextClip` vuole il **percorso** di un file di font, non un nome. `fonts.py` risolve
+- Il testo lo disegna **`text.py` con Pillow**, non il `TextClip` di MoviePy: il suo
+  `caption` spezza le righe dentro le parole, e dalla 2.2 il suo `label` taglia in
+  basso l'ultima riga di ogni scritta. Non tornare a `TextClip`.
+- Pillow vuole il **percorso** di un file di font, non un nome. `fonts.py` risolve
   percorsi, nomi installati e un default di sistema: passa sempre da lì.
-- Il `method="caption"` di MoviePy 2.1.x spezza **dentro** le parole quando il testo
-  occupa più di due righe (mescola indici assoluti e relativi in `__break_text`).
-  L'a capo lo calcola `fonts.wrap_text`: non tornare a `caption`.
 - Larghezze/altezze dispari fanno fallire libx264. Se aggiungi ridimensionamenti
   dinamici (zoom, Ken Burns), arrotonda a numeri pari.

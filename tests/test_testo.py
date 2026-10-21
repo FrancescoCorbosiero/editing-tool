@@ -4,6 +4,7 @@ Test dello stile del testo: font, contorno, sfondo, a capo, allineamento.
 I clip di testo sono immagini generate in memoria: nessun file richiesto.
 """
 
+import numpy as np
 import pytest
 
 from vedit import fonts
@@ -86,7 +87,7 @@ def test_le_parole_non_vengono_spezzate():
 
 
 def test_le_andate_a_capo_esistenti_si_rispettano():
-    # In un .srt l'a capo e' una scelta di chi ha sottotitolato.
+    # Un a capo scritto nel testo e' una scelta di chi l'ha scritto.
     testo = "Prima riga\nSeconda riga"
     assert fonts.wrap_text(testo, fonts.default_font(), 20, max_width=9999) == testo
 
@@ -138,7 +139,7 @@ def test_lo_sfondo_semitrasparente_finisce_nella_maschera():
 
 
 def test_lo_sfondo_accetta_anche_una_terna_rgb():
-    from vedit.builder import resolve_background
+    from vedit.text import resolve_background
 
     assert resolve_background(stile(bg_color=[10, 20, 30], bg_opacity=0.5)) == (10, 20, 30, 128)
     assert resolve_background(stile(bg_color="black", bg_opacity=1.0)) == (0, 0, 0, 255)
@@ -156,6 +157,97 @@ def test_il_contorno_ingrandisce_il_disegno():
     senza = clip("Ciao", stile())
     con = clip("Ciao", stile(stroke_color="black", stroke_width=4))
     assert con.w > senza.w
+
+
+# -- disegno con Pillow -----------------------------------------------------
+#
+# Questi test guardano i pixel, senza MoviePy: il testo lo disegna text.py.
+
+def inchiostro_di_riferimento(righe: list[str], style: TextStyle) -> int:
+    """Quanti pixel di testo produce Pillow disegnando le righe su una tela enorme."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    font = ImageFont.truetype(str(fonts.default_font()), style.font_size)
+    totale = 0
+    for riga in righe:
+        tela = Image.new("RGBA", (2000, 400), (0, 0, 0, 0))
+        ImageDraw.Draw(tela).text(
+            (200, 100), riga, font=font, fill=(255, 255, 255, 255),
+            stroke_width=style.stroke_width if style.stroke_color else 0,
+            stroke_fill=(0, 0, 0, 255) if style.stroke_color else None,
+        )
+        totale += int((np.asarray(tela)[:, :, 3] > 0).sum())
+    return totale
+
+
+def test_nessuna_riga_resta_tagliata():
+    """
+    Il difetto di TextClip in MoviePy 2.2: l'ultima riga usciva mozzata in
+    basso. Qui ogni pixel che Pillow disegnerebbe su una tela enorme deve
+    esserci anche nell'immagine del testo.
+    """
+    from vedit.text import render_text
+
+    style = stile(font_size=40)
+    righe = ["Prima riga", "seconda con le gambe", "pqgyj"]
+    rgba = render_text("\n".join(righe), style, canvas_width=2000)
+    assert int((rgba[:, :, 3] > 0).sum()) == inchiostro_di_riferimento(righe, style)
+
+
+def test_nessun_contorno_resta_tagliato():
+    from vedit.text import render_text
+
+    style = stile(font_size=40, stroke_color="black", stroke_width=5)
+    rgba = render_text("pqgyj ÀÉ", style, canvas_width=2000)
+    assert int((rgba[:, :, 3] > 0).sum()) == inchiostro_di_riferimento(["pqgyj ÀÉ"], style)
+
+
+def test_le_righe_sono_alte_uguale_qualunque_lettera_contengano():
+    # "ace" non ha ne' ascendenti ne' discendenti, "Tpg" si': un riquadro di
+    # sfondo che cambiasse altezza da una scritta all'altra si noterebbe.
+    from vedit.text import render_text
+
+    style = stile(font_size=40, bg_color="black", padding=10)
+    assert render_text("ace", style, 800).shape[0] == render_text("Tpg", style, 800).shape[0]
+
+
+def test_il_riquadro_ha_il_colore_e_l_opacita_chiesti():
+    from vedit.text import render_text
+
+    rgba = render_text("Ciao", stile(bg_color=[200, 0, 0], bg_opacity=0.5, padding=12), 800)
+    meta = rgba.shape[0] // 2
+    # Un pixel nel margine, lontano dalle lettere e dagli angoli arrotondati
+    assert tuple(rgba[meta, 3]) == (200, 0, 0, 128)
+
+
+def test_le_lettere_restano_opache_sopra_un_riquadro_trasparente():
+    from vedit.text import render_text
+
+    rgba = render_text("I", stile(font_size=60, bg_color="black", bg_opacity=0.3, padding=10), 800)
+    assert rgba[:, :, 3].max() == 255
+
+
+def test_allineamento_a_sinistra_e_a_destra():
+    from vedit.text import render_text
+
+    def primo_pixel(rgba, riga):
+        alpha = rgba[riga, :, 3]
+        return int(np.argmax(alpha > 0)), int(len(alpha) - np.argmax(alpha[::-1] > 0))
+
+    testo = "riga lunghissima\ncorta"
+    sinistra = render_text(testo, stile(font_size=30, align="left"), 800)
+    destra = render_text(testo, stile(font_size=30, align="right"), 800)
+    alto, basso = sinistra.shape[0] // 4, sinistra.shape[0] * 3 // 4
+    # A sinistra le due righe cominciano nello stesso punto, a destra finiscono
+    assert abs(primo_pixel(sinistra, alto)[0] - primo_pixel(sinistra, basso)[0]) <= 3
+    assert abs(primo_pixel(destra, alto)[1] - primo_pixel(destra, basso)[1]) <= 3
+
+
+def test_colore_sconosciuto_e_un_errore_leggibile():
+    from vedit.text import render_text
+
+    with pytest.raises(ConfigError, match="Colore non riconosciuto"):
+        render_text("Ciao", stile(color="verdolino"), 800)
 
 
 # -- validazione ------------------------------------------------------------

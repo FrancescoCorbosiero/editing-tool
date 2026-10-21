@@ -1,12 +1,10 @@
 """
 Trovare un font utilizzabile, che e' il problema numero uno del testo su video.
 
-MoviePy disegna il testo con Pillow, che vuole il **percorso di un file** `.ttf`
-o `.otf`: non conosce i nomi dei font installati come farebbe un word processor.
-Se non gli si dice niente ripiega su un font interno minimale, che a 60 pixel di
-altezza si vede che e' un ripiego. Su altri sistemi la stessa chiamata fallisce
-del tutto: e' la ragione per cui in rete si trovano decine di segnalazioni di
-"TextClip non funziona".
+Il testo lo disegna Pillow (vedi text.py), che vuole il **percorso di un file**
+`.ttf` o `.otf`: non conosce i nomi dei font installati come farebbe un word
+processor. Se non gli si dice niente ripiega su un font interno minimale, che a
+60 pixel di altezza si vede che e' un ripiego.
 
 Questo modulo risolve la faccenda in tre modi, in ordine di precedenza:
   1. un percorso esplicito nel YAML (relativo alla cartella del progetto);
@@ -124,12 +122,12 @@ def wrap_text(text: str, font_path: Path, font_size: int, max_width: float,
     Perche' non usiamo quello di MoviePy: il suo `method="caption"` spezza
     *dentro* le parole ("larghe / zza") quando il testo occupa piu' di due
     righe, perche' mescola indici assoluti e relativi mentre accumula le righe.
-    Misurare qui con Pillow costa una frazione di millisecondi per battuta e
+    Misurare qui con Pillow costa una frazione di millisecondi per scritta e
     da' un risultato corretto - e in piu' il riquadro di sfondo resta largo
     quanto la riga piu' lunga, invece di allargarsi sempre al massimo.
 
-    Le andate a capo gia' presenti nel testo (quelle di un .srt, per esempio)
-    vengono rispettate: sono scelte di chi ha scritto, non incidenti.
+    Le andate a capo gia' presenti nel testo vengono rispettate: sono scelte di
+    chi ha scritto, non incidenti.
     """
     from PIL import ImageFont
 
