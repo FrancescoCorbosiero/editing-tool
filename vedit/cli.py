@@ -540,7 +540,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    # Fino a Python 3.11 argparse non sa riprendere una lista di file DOPO
+    # un'opzione: `vedit new edits/x --template t a.jpg b.jpg` lascia fuori
+    # a.jpg e b.jpg come "argomenti non riconosciuti", mentre dalla 3.12 li
+    # assegna ai media. Qui si raccolgono a mano, cosi' l'ordine non conta su
+    # nessuna versione.
+    args, extra = parser.parse_known_args(argv)
+    if extra:
+        if args.command in ("new", "apply") and not any(e.startswith("-") for e in extra):
+            args.media = [*args.media, *extra]
+        else:
+            parser.error(f"argomenti non riconosciuti: {' '.join(extra)}")
     setup_logging(args.verbose)
 
     try:

@@ -370,6 +370,29 @@ def test_new_crea_l_edit_con_le_sue_cartelle(repo, capsys):
     assert main(["new", str(root), "--template", str(repo / "templates" / "prova")]) == 1
 
 
+def test_new_accetta_i_media_anche_dopo_le_opzioni(repo):
+    """
+    Il comando come lo scrive chiunque: prima la cartella, poi --template, poi
+    i file. Fino a Python 3.11 argparse rifiutava i file dopo l'opzione.
+    """
+    from vedit.cli import main
+
+    root = repo / "edits" / "ordinato"
+    media = repo / "edits" / "video" / "media"
+    assert main(["new", str(root), "--template", str(repo / "templates" / "prova"),
+                 str(media / "02.jpg"), str(media / "01.jpg")]) == 0
+    dati = yaml.safe_load((root / "edit.yaml").read_text(encoding="utf-8"))
+    assert [Path(m).name for m in dati["media"][:2]] == ["02.jpg", "01.jpg"]
+
+
+def test_un_opzione_sconosciuta_resta_un_errore(repo):
+    from vedit.cli import main
+
+    with pytest.raises(SystemExit):
+        main(["new", str(repo / "edits" / "x"), "--template", str(repo / "templates" / "prova"),
+              "--colore", "rosso"])
+
+
 def test_un_media_mancante_si_dice_prima_di_renderizzare(repo, capsys):
     from vedit.cli import main
 
