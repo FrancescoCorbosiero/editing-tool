@@ -256,8 +256,9 @@ aiuta a parlarne.
 ### Limiti, onestamente
 
 Il rilevatore trova i **tagli netti**, che sono la stragrande maggioranza; una
-dissolvenza lenta fra due immagini non produce nessun picco. I lampi sotto il quarto
-di secondo diventano parte del posto prima (`--min-slot` per tenerli). Il tempo si
+dissolvenza lenta fra due immagini non produce nessun picco. Gli stacchi rapidi da
+mezzo battito restano posti; i lampi sotto 0.15s si fondono con il posto vicino
+(`--min-slot 0.1` per tenerli). Il tempo si
 riconosce su musica con una cassa marcata e un tempo stabile — elettronica, pop, hip
 hop — e sbaglia su registrazioni dal vivo e brani acustici. Per questo `vedit shots`,
 `vedit beats` e `vedit sheet --shots` esistono come comandi a sé: si guarda cosa ha

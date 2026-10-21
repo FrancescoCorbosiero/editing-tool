@@ -448,9 +448,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_extract.add_argument("--sensitivity", type=float, default=4.0,
                            help="quanto deve cambiare l'immagine per contare come taglio "
                                 "(default: 4, guarda prima con `vedit shots`)")
-    p_extract.add_argument("--min-slot", type=float, default=0.25,
+    p_extract.add_argument("--min-slot", type=float, default=0.15,
                            help="durata minima di uno slot: i tagli piu' fitti vengono "
-                                "scartati (default: 0.25)")
+                                "scartati (default: 0.15, appena sotto il mezzo battito "
+                                "di una canzone veloce)")
     p_extract.add_argument("--transition", type=float, default=0.0,
                            help="durata della transizione fra gli slot (default: 0, "
                                 "cioe' stacco netto)")

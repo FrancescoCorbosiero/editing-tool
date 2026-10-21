@@ -43,6 +43,13 @@ vedit extract <video> -o templates/<nome> --name <nome>
 Leggi l'output: la riga `Stile` (fit, dissolvenze), il numero di posti, la colonna
 `nel riferimento` (video/image). Se vuoi vedere i tagli trovati: `vedit shots <video>`.
 
+Controlla che non manchino battiti: confronta il numero di posti con i tagli che
+vede un rilevatore piu' fine, `vedit shots <video> --min-shot 0.1`. Gli stacchi
+rapidi da mezzo battito restano posti da soli; se ne trovi di ancora piu' brevi e
+nei provini si vede che sono voluti (non un flash o un glitch), riestrai con
+`--min-slot 0.1 --force`. I tagli finti dentro una dissolvenza finale si scartano
+da soli.
+
 ## 4. Correggi a mano quello che serve
 
 Apri `templates/<nome>/template.yaml` e confrontalo con quello che hai visto:

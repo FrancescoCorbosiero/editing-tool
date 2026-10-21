@@ -59,8 +59,11 @@ TOLERANCE = 0.25
 
 # Sotto questa durata uno slot non e' un posto in cui mettere un media: e' un
 # lampo. Meglio unirlo al precedente che chiedere all'utente una foto per 8
-# centesimi di secondo.
-MIN_SLOT = 0.25
+# centesimi di secondo. La soglia sta appena sotto il mezzo battito di una
+# canzone veloce (0.2s a 150 BPM, 0.18s a 170): i montaggi a tempo usano
+# spesso due stacchi da mezzo battito di fila, e sono proprio quelli che si
+# sentono. Un valore piu' alto li fondeva, e il template perdeva i battiti.
+MIN_SLOT = 0.15
 
 # Un movimento su uno slot piu' corto di cosi' non si legge come movimento, si
 # legge come un tremolio: le foto piu' brevi restano ferme.
