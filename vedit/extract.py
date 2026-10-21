@@ -59,16 +59,21 @@ TOLERANCE = 0.25
 
 # Sotto questa durata uno slot non e' un posto in cui mettere un media: e' un
 # lampo. Meglio unirlo al precedente che chiedere all'utente una foto per 8
-# centesimi di secondo.
-MIN_SLOT = 0.25
+# centesimi di secondo. La soglia sta appena sotto il mezzo battito di una
+# canzone veloce (0.2s a 150 BPM, 0.18s a 170): i montaggi a tempo usano
+# spesso due stacchi da mezzo battito di fila, e sono proprio quelli che si
+# sentono. Un valore piu' alto li fondeva, e il template perdeva i battiti.
+MIN_SLOT = 0.15
 
 # Un movimento su uno slot piu' corto di cosi' non si legge come movimento, si
 # legge come un tremolio: le foto piu' brevi restano ferme.
 MOTION_MIN_SLOT = 0.6
 
 # Sotto questa durata non vale la pena dire cosa c'era nel riferimento: in un
-# lampo di mezzo secondo va bene qualsiasi cosa, video o foto.
-HINT_MIN_SLOT = 0.6
+# lampo va bene qualsiasi cosa, video o foto. Un battito intero invece conta
+# gia' (0.54s a 111 BPM): un montaggio di sole riprese e uno di sole foto
+# sulla stessa canzone sono due video diversi.
+HINT_MIN_SLOT = 0.45
 
 # Una dissolvenza al nero finisce in un fotogramma quasi nero (luminosita' media
 # sotto questa soglia, su 255) e lo raggiunge per gradi: un salto di luce piu'
@@ -428,8 +433,11 @@ def extract(source: str | Path, destination: str | Path, name: str = "",
             "un'altra musica non avrebbe senso trapiantarlo"
         )
 
-    # 2. I tagli.
-    shots = scenes.analyze(source, sensitivity=sensitivity)
+    # 2. I tagli. Il rilevatore fonde da solo le inquadrature piu' corte del suo
+    #    minimo: se si chiedono slot piu' brevi, deve vederli anche lui,
+    #    altrimenti `min_slot` non recupererebbe niente.
+    shots = scenes.analyze(source, sensitivity=sensitivity,
+                           min_shot=min(scenes.MIN_SHOT, min_slot))
     if not shots.cuts:
         warnings.append(
             "Nessun taglio rilevato: il template avra' un solo slot. Se il video "
@@ -473,7 +481,7 @@ def extract(source: str | Path, destination: str | Path, name: str = "",
         source={
             "file": source.name,
             "duration": round(duration, 2),
-            "extracted": date.today().isoformat(),
+            "extracted": date.today(),
         },
         root=destination.resolve(),
     )
@@ -575,7 +583,7 @@ def render(template: Template, grid: str = "half") -> str:
     if template.source:
         righe.append("source:                 # da dove e' stato estratto: solo memoria")
         for chiave, valore in template.source.items():
-            righe.append(f"  {chiave}: {valore}")
+            righe.append(f"  {chiave}: {_yaml_value(valore)}")
         righe.append("")
 
     righe += [
@@ -661,8 +669,8 @@ def describe(result: Extraction, destination: Path) -> str:
 
     lines += [
         "",
-        f"Servono {len(template.slots)} media (o meno: si ripetono). Provalo con:",
-        f"  python -m vedit apply {destination} <i tuoi file> --preview",
+        f"Servono {len(template.slots)} media (o meno: si ripetono). Un video nuovo:",
+        f"  vedit new edits/mio-video --template {Path(destination).as_posix()}",
     ]
     return "\n".join(lines)
 

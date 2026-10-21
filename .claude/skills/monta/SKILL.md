@@ -55,7 +55,7 @@ texts:
     slot: 2-8             # QUANDO: un posto (3), un intervallo (2-8), oppure at: 4.2 (+ duration)
     position: top         # DOVE: top, center, bottom, un numero 0-1 (altezza) o [x, y]
   - text: "Funziona davvero?"
-    slot: 21
+    slot: 26
     bg_color: black       # stile: solo se serve cambiare quello del template
     bg_opacity: 0.6
     padding: 16
@@ -63,6 +63,11 @@ texts:
 
 Preferisci `slot` ad `at`: un testo agganciato ai posti compare e sparisce sul
 battito. Non mettere due testi nello stesso punto nello stesso momento.
+
+Se l'utente dice che **manca un battito** (o che ce n'è uno di troppo), il problema è
+il template, non l'edit: correggilo con `vedit slots` come dice la skill `templetizza`
+("Quando l'utente sente un battito che manca"), poi sistema questo edit: un media per
+ogni posto nuovo, i `slot:` dei testi spostati.
 
 ## 4. Controlla, guarda, consegna
 

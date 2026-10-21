@@ -217,7 +217,14 @@ staccando fra un battito e l'altro: non è un errore, è una scelta.
 **Quantizzare** — spostare qualcosa sulla griglia del tempo più vicina. È un termine
 preso dai sequencer musicali, dove la stessa operazione rimette in riga una battuta
 suonata a mano. In `vedit` lo fa `extract` con i tagli che trova, e lo fa in modo
-prudente: solo se erano già vicini al battito.
+prudente: solo se erano già vicini al battito. Lo fa anche `vedit slots --cut`, senza
+prudenza: un taglio segnato a orecchio cade sempre un po' prima o un po' dopo, e va
+rimesso dove lo vuole la musica.
+
+**Drop** — il momento in cui, dopo un'attesa (una voce sola, un crescendo), entra di
+colpo il basso. È il punto più forte di un brano da social, e un montaggio lo
+sottolinea con stacchi fitti, uno per colpo: in `raffica` sono quattro cambi
+d'immagine in due battiti, poi la raffica regolare.
 
 ---
 

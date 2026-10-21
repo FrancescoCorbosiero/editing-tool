@@ -57,15 +57,22 @@ al posto tuo. Il repo ha due skill che descrivono la procedura passo per passo:
 |---|---|---|
 | carichi un video e chiedi di **templetizzarlo** | ne estrae musica, tagli e stile, lo verifica e lo salva in `templates/` | `templetizza` |
 | mandi immagini, video, GIF e i **testi** che vuoi | crea l'edit, mette i media nei posti, i testi dove dici, controlla i provini e ti manda il video | `monta` |
+| senti che **manca un battito** (o che ce n'è uno di troppo) | aggiunge, divide o toglie i tagli del template e ti manda i posti numerati sulla musica, da riascoltare | `templetizza` |
 
 Per cambiare qualcosa basta dirlo ("metti il video al posto 5", "il titolo più in
 alto", "togli l'ultima scritta"): l'edit si corregge e il template resta lo stesso.
+Se invece è il ritmo a non tornare ("al drop mancano dei colpi", "il 4 dividilo in
+due"), si correggono i tagli del template, e la correzione vale per ogni video fatto
+con lui.
 
 ## A mano
 
 ```bash
 vedit extract riferimento.mp4 -o templates/raffica   # un template da un video
 vedit templates                                      # i template che hai
+vedit slots templates/raffica                        # i suoi posti, uno per riga
+vedit slots templates/raffica --video                # i posti numerati sulla musica
+vedit slots templates/raffica --cut 4.45             # un taglio in più, sul battito
 
 vedit new edits/ormone --template templates/raffica  # un edit nuovo, commentato posto per posto
 vedit render edits/ormone --check                    # cosa cade dove, senza renderizzare
@@ -90,12 +97,12 @@ per riga, con un commento che dice quando entra, quanto dura e cosa c'era lì ne
 di riferimento.
 
 ```yaml
-template: ../../templates/raffica      # 28 posti, 151.5 BPM, 18.13s, 720x1280
+template: ../../templates/raffica      # 33 posti, 151.5 BPM, 18.13s, 720x1280
 
 media:
-  - media/01.mp4                 #  1)    0.00s  dura 4.06s  video
-  - media/02.jpg                 #  2)    4.06s  dura 0.59s
-  - media/03.jpg                 #  3)    4.65s  dura 0.40s
+  - media/01.mp4                 #  1)    0.00s  dura 3.86s  video  [apertura]
+  - media/02.jpg                 #  2)    3.86s  dura 0.20s
+  - media/03.jpg                 #  3)    4.06s  dura 0.20s
   ...
 
 texts: []
@@ -135,7 +142,7 @@ texts:
     duration: 2.5
     position: bottom
   - text: "Funziona davvero?"
-    slot: 21
+    slot: 26
     bg_color: black
     bg_opacity: 0.6
     padding: 16
@@ -195,12 +202,13 @@ Traccia  : audio.m4a  (18.13s)
 Tempo    : 151.5 BPM  (un battito ogni 0.396s, il primo a 0.100s)
 Formato  : 720x1280 @ 30 fps
 Stile    : media interi su rgb(0, 0, 0) (contain), si spegne nel nero in 1.97s
-Slot     : 28  (il piu' corto 0.26s, il piu' lungo 4.06s)
-Griglia  : half - 25 tagli riallineati al battito, in media di 26 ms
+Slot     : 32  (il piu' corto 0.17s, il piu' lungo 3.86s)
+Griglia  : half - 26 tagli riallineati al battito, in media di 26 ms
 
   #   entra a   dura   battiti  transizione  nel riferimento  movimento
-  1      0.00   4.06s    10.25  cut          video            -
-  2      4.06   0.59s     1.50  cut          -                -
+  1      0.00   3.86s     9.75  cut          video            -
+  2      3.86   0.20s     0.50  cut          -                -
+  3      4.06   0.20s     0.50  cut          -                -
   ...
 ```
 
@@ -229,6 +237,41 @@ Il template **riproduce** il riferimento, non lo abbellisce: una foto finisce in
 movimento solo dove il riferimento scorreva davvero, e mai se le immagini entrano
 intere (il movimento le taglierebbe).
 
+### Correggere i tagli a orecchio: `vedit slots`
+
+Il template riproduce i tagli del riferimento, e il riferimento non è legge: in
+`raffica` il basso entra con quattro colpi da mezzo battito, e il video originale
+cambiava immagine solo sui primi tre. Nessun rilevatore può indovinare che il quarto
+lo vuoi: è gusto. `vedit slots` corregge i tagli con le parole di chi ascolta.
+
+```
+$ vedit slots templates/raffica --cut 4.45
+raffica: 32 posti -> 33
+  (4.45 -> 4.456s, sulla griglia del battito)
+  + taglio a 4.456s: comincia il posto 5
+  i posti dal 5 al 32 ora sono dal 6 al 33
+
+Per tornare indietro: vedit slots templates/raffica --merge 5
+```
+
+| comando | cosa fa |
+|---|---|
+| `vedit slots templates/raffica` | l'elenco dei posti: quando entrano, quanto durano, quanti battiti |
+| `--cut 4.45` | un taglio in più (anche `0:04.45`), rimesso sul mezzo battito più vicino: a orecchio si segna sempre un po' prima o un po' dopo |
+| `--split 4` | il posto 4 diviso in due parti uguali; con `--into 4` in quattro, con `--into 3` una terzina |
+| `--merge 5` | il posto 5 si unisce al 4: via il taglio fra i due |
+| `--grid` | dove allineare i `--cut`: `beat`, `half` (default), `quarter`, oppure `off` |
+| `--video` | i posti numerati sulla musica, in `output/<template>-posti.mp4` |
+
+I numeri sono sempre quelli dell'elenco **di prima** del comando, anche con più
+operazioni insieme. Il video dei posti è il modo di decidere: un cartello colorato con
+il suo numero per ogni posto, sulla traccia del template. Lo guardi, senti dove manca
+un taglio, e sai già come chiamarlo ("il 4 in due"). I decimali si scrivono col punto.
+
+Cambiare i posti cambia i numeri: gli edit costruiti su quel template vanno
+ricontrollati (`vedit slots` dice quali sono), con un media in più per ogni posto
+nuovo e i `slot:` dei testi spostati di conseguenza.
+
 ### Lo schema di `template.yaml`
 
 | campo | | significato |
@@ -250,14 +293,15 @@ intere (il movimento le taglierebbe).
 
 **Uno slot non ha una durata.** Finisce quando comincia il successivo, e l'ultimo con
 la traccia. Il template è un file di testo pensato per essere corretto a mano:
-spostare un `at` sposta *quel* taglio e basta; dare un `label` ai posti che contano
-aiuta a parlarne.
+spostare un `at` sposta *quel* taglio e basta (per aggiungerne o toglierne c'è
+`vedit slots`); dare un `label` ai posti che contano aiuta a parlarne.
 
 ### Limiti, onestamente
 
 Il rilevatore trova i **tagli netti**, che sono la stragrande maggioranza; una
-dissolvenza lenta fra due immagini non produce nessun picco. I lampi sotto il quarto
-di secondo diventano parte del posto prima (`--min-slot` per tenerli). Il tempo si
+dissolvenza lenta fra due immagini non produce nessun picco. Gli stacchi rapidi da
+mezzo battito restano posti; i lampi sotto 0.15s si fondono con il posto vicino
+(`--min-slot 0.1` per tenerli). Il tempo si
 riconosce su musica con una cassa marcata e un tempo stabile — elettronica, pop, hip
 hop — e sbaglia su registrazioni dal vivo e brani acustici. Per questo `vedit shots`,
 `vedit beats` e `vedit sheet --shots` esistono come comandi a sé: si guarda cosa ha
@@ -276,20 +320,21 @@ niente. Non importa nemmeno MoviePy: risponde in un attimo.
 ```
 $ vedit render edits/ormone --check
   #   entra a   dura   media
-  1      0.00   4.06s  apertura.mp4
-  2      4.06   0.59s  grafico.png
+  1      0.00   3.86s  apertura.mp4
+  2      3.86   0.20s  grafico.png
+  3      4.06   0.20s  studio.png
+  4      4.26   0.20s  onda.gif   (in loop)
  ...
- 11      7.82   0.40s  onda.gif   (in loop)
 
   #  inizio     fine    durata  transizione  tipo   segmento
-  0  0:00.00  0:04.06     4.06s  -    video  apertura  apertura.mp4  [0 -> 4.06]  muto  720x1280
+  0  0:00.00  0:03.86     3.86s  -    video  apertura  apertura.mp4  [0 -> 3.86]  muto  720x1280
  ...
 Durata totale: 0:18.13  (18.13s, 543 fotogrammi)
 Dissolvenze : al nero negli ultimi 1.97s
 
 Sopra il montaggio (2):
    inizio     fine  dove      cosa
-  0:04.06  0:07.13  top       L'ormone della crescita
+  0:03.86  0:05.84  top       L'ormone della crescita
   0:11.78  0:13.76  center    Funziona davvero?
 
 Avvisi (1):
@@ -472,14 +517,34 @@ winget install Gyan.FFmpeg       # Windows
 sudo apt install ffmpeg          # Ubuntu/Debian
 ```
 
-**2. Python 3.10+**, dalla cartella del repo:
+Dopo l'installazione apri un terminale nuovo, e `ffmpeg -version` deve rispondere.
+
+**2. Python 3.10+**, dalla cartella del repo (quella con `pyproject.toml`).
+
+macOS e Linux:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"          # installa vedit, pytest e ruff
 vedit templates                  # se risponde, funziona
 ```
+
+Windows (PowerShell), un comando per riga:
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+vedit templates
+```
+
+Su Windows `python` spesso apre il Microsoft Store invece di Python: è un collegamento
+di sistema ("alias di esecuzione dell'app") che intercetta il comando. `py`, il
+launcher installato insieme a Python, lo evita; dentro l'ambiente attivato `python`
+torna a funzionare. Se `Activate.ps1` dice che l'esecuzione di script è disabilitata,
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` la permette per quella
+finestra sola. L'ambiente va riattivato in ogni terminale nuovo.
 
 `-e` (*editable*) collega il progetto alla cartella invece di copiarlo: le modifiche
 al codice sono attive subito. `python -m vedit ...` funziona anche senza installare.

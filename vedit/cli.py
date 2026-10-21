@@ -2,6 +2,7 @@
 Interfaccia da riga di comando.
 
     vedit extract riferimento.mp4 -o templates/nome      # video -> template
+    vedit slots templates/nome --cut 4.45 --video        # un taglio in piu', a orecchio
     vedit new edits/video --template templates/nome      # un edit nuovo sul template
     vedit render edits/video --check                     # cosa cade dove, senza render
     vedit render edits/video --preview                   # anteprima veloce
@@ -247,6 +248,80 @@ def cmd_templates(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_slots(args: argparse.Namespace) -> int:
+    """I posti di un template: elencarli, cambiare i tagli, guardarli sulla musica."""
+    from .extract import render as render_template
+    from .slots import describe, describe_change, edits_using, renumbering, retime
+    from .templates import MANIFEST, Template
+
+    template = Template.from_yaml(args.template)
+    nome = Path(args.template).as_posix()
+    if nome.endswith(f"/{MANIFEST}"):
+        nome = nome[: -len(MANIFEST) - 1]
+
+    if args.cut or args.split or args.merge:
+        result = retime(template, cuts=args.cut or [], split=args.split or [],
+                        into=args.into, merge=args.merge or [], grid=args.grid)
+        print(describe_change(template, result, nome))
+        if result.changed:
+            (template.root / MANIFEST).write_text(render_template(result.template),
+                                                  encoding="utf-8")
+            edits = edits_using(template, "edits")
+            if edits:
+                # Un edit mette i media nei posti in ordine e aggancia i testi ai
+                # numeri: con i posti cambiati, gli uni e gli altri vanno rivisti.
+                print(f"\nQuesti edit usano {template.name}, e i numeri dei posti sono cambiati:")
+                print("\n".join(f"  {path.as_posix()}" for path in edits))
+                for riga in renumbering(template, result):
+                    print(f"  ({riga})")
+                print("Nella lista 'media' serve un file per ogni posto nuovo, e i 'slot:' dei "
+                      "testi vanno spostati di conseguenza. Controlla con:")
+                print(f"  vedit render {edits[0].parent.as_posix()} --check")
+        template = result.template
+    elif not args.video:
+        print(describe(template, nome))
+        return 0
+
+    if args.video:
+        target = _slots_video(template, Path(args.output) if args.output
+                              else Path("output") / f"{template.name}-posti.mp4")
+        print(f"\nI posti numerati sulla musica: {target}")
+    return 0
+
+
+def _slots_video(template, output: Path) -> Path:
+    """
+    Il template montato con un cartello numerato per posto, sulla sua traccia.
+
+    E' il modo di sentire dove cade ogni taglio prima di metterci dei media, e di
+    poterne parlare: "il 4 va diviso" invece di "verso il quarto secondo". Va a
+    meta' risoluzione e al massimo a 30 fps, perche' serve a guardare il ritmo,
+    non i dettagli; 30 e non i 24 dell'anteprima, perche' a 24 fps un taglio
+    puo' cadere fino a 20 ms fuori posto, e qui il posto e' l'unica cosa che conta.
+    """
+    import tempfile
+
+    from .builder import close_all, render  # import pigro: MoviePy e' lento
+    from .slots import cards
+    from .templates import MediaRef, bind
+
+    ensure_ffmpeg()
+    size = (max(2, template.size[0] // 4 * 2), max(2, template.size[1] // 4 * 2))
+    # ignore_cleanup_errors: su Windows un file appena letto puo' essere ancora
+    # aperto quando la cartella temporanea viene cancellata.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        files = cards(template, tmp, width=size[0])
+        bound = bind(template, [MediaRef(path=f) for f in files], output=output,
+                     size=size, fps=min(template.fps, 30), root=Path.cwd())
+        project = bound.project(Path.cwd())
+        project.output.preset = "ultrafast"
+        try:
+            target = render(project)
+        finally:
+            close_all()
+    return target
+
+
 def _parse_size(value: str | None) -> tuple[int, int] | None:
     """`1080x1920` -> (1080, 1920)."""
     if not value:
@@ -448,9 +523,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_extract.add_argument("--sensitivity", type=float, default=4.0,
                            help="quanto deve cambiare l'immagine per contare come taglio "
                                 "(default: 4, guarda prima con `vedit shots`)")
-    p_extract.add_argument("--min-slot", type=float, default=0.25,
+    p_extract.add_argument("--min-slot", type=float, default=0.15,
                            help="durata minima di uno slot: i tagli piu' fitti vengono "
-                                "scartati (default: 0.25)")
+                                "scartati (default: 0.15, appena sotto il mezzo battito "
+                                "di una canzone veloce)")
     p_extract.add_argument("--transition", type=float, default=0.0,
                            help="durata della transizione fra gli slot (default: 0, "
                                 "cioe' stacco netto)")
@@ -531,6 +607,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_templates.add_argument("directory", nargs="?", default="templates",
                              help="cartella che li contiene (default: templates)")
     p_templates.set_defaults(func=cmd_templates)
+
+    p_slots = sub.add_parser(
+        "slots",
+        help="mostra i posti di un template e ne cambia i tagli",
+        description="Senza opzioni elenca i posti. --cut, --split e --merge cambiano i "
+                    "tagli e riscrivono il template.yaml: i numeri dei posti sono sempre "
+                    "quelli dell'elenco di prima del comando. --video monta i posti "
+                    "numerati sulla musica, per vedere e sentire dove cade ogni taglio.",
+    )
+    p_slots.add_argument("template", help="cartella del template (o il suo template.yaml)")
+    p_slots.add_argument("--cut", nargs="+", action="extend", metavar="ISTANTE",
+                         help="un taglio in piu' a questo istante (4.45 o 0:04.45), "
+                              "allineato alla griglia del battito")
+    p_slots.add_argument("--split", nargs="+", action="extend", type=int, metavar="POSTO",
+                         help="divide il posto in parti uguali: due, o quante dice --into")
+    p_slots.add_argument("--into", type=int, default=2,
+                         help="in quante parti dividere con --split (default: 2)")
+    p_slots.add_argument("--merge", nargs="+", action="extend", type=int, metavar="POSTO",
+                         help="unisce il posto a quello prima: toglie il taglio con cui comincia")
+    p_slots.add_argument("--grid", choices=("beat", "half", "quarter", "off"), default="half",
+                         help="dove allineare i --cut: battiti, mezzi battiti (default), "
+                              "quarti, o 'off' per lasciarli dove li scrivi")
+    p_slots.add_argument("--video", action="store_true",
+                         help="monta i posti numerati sulla musica (dopo le modifiche, "
+                              "se ce ne sono)")
+    p_slots.add_argument("-o", "--output",
+                         help="il video dei posti (default: output/<template>-posti.mp4)")
+    p_slots.set_defaults(func=cmd_slots)
 
     p_fonts = sub.add_parser("fonts", help="elenca i font utilizzabili per testo e sottotitoli")
     p_fonts.set_defaults(func=cmd_fonts)

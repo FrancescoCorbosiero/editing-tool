@@ -16,7 +16,7 @@ MODULI_LEGGERI = ["vedit.models", "vedit.timeline", "vedit.transitions",
                   "vedit.report", "vedit.ffmpeg_tools", "vedit.beats",
                   "vedit.fonts", "vedit.text", "vedit.motion",
                   "vedit.scenes", "vedit.templates", "vedit.extract",
-                  "vedit.edit", "vedit.sheet"]
+                  "vedit.edit", "vedit.sheet", "vedit.slots"]
 
 
 def importa_e_controlla(modulo: str) -> subprocess.CompletedProcess:

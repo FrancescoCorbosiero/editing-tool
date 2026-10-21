@@ -509,6 +509,8 @@ def skeleton(template: Template, template_path: Path, root: Path, name: str,
         commento = f"{i + 1:2d})  {slot.at:6.2f}s  dura {gaps[i]:.2f}s"
         if slot.hint:
             commento += f"  {slot.hint}"
+        if slot.label:
+            commento += f"  [{slot.label}]"
         righe.append(f"  - {_quote(valore):<28} # {commento}")
 
     righe += [
@@ -537,9 +539,9 @@ def _portable(path: Path, root: Path) -> str:
     mentre un percorso assoluto vale solo su quella che l'ha scritto.
     """
     try:
-        return os.path.relpath(Path(path).resolve(), Path(root).resolve())
+        return Path(os.path.relpath(Path(path).resolve(), Path(root).resolve())).as_posix()
     except ValueError:                      # dischi diversi, su Windows
-        return str(Path(path).resolve())
+        return Path(path).resolve().as_posix()
 
 
 def _quote(value: str) -> str:

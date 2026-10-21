@@ -1,0 +1,177 @@
+# ---------------------------------------------------------------------------
+# TEMPLATE AUDIO: jumpstyle
+#
+# Un montaggio riutilizzabile. La musica, gli istanti dei tagli e lo stile
+# sono fissi; i media e i testi no: quelli li mette ogni edit.
+#
+#   vedit new edits/mio-video --template templates/jumpstyle
+#
+# `at` e' l'istante in cui uno slot entra in scena, misurato sulla traccia
+# audio qui sotto. Uno slot finisce quando comincia il successivo, e l'ultimo
+# finisce con la traccia: le durate non si scrivono, si deducono.
+# ---------------------------------------------------------------------------
+
+name: jumpstyle
+duration: 28.328          # quanto dura il montaggio completo
+
+audio:
+  src: audio.m4a          # la traccia, che vive dentro questa cartella
+  bpm: 111.2              # un battito ogni 0.540s
+  offset: 0.12            # dove cade il primo battito
+  volume: 1               # 1 = com'e', 0.5 = a meta'
+  fade_out: 0             # dissolvenza audio in chiusura
+
+format:
+  size: [1080, 1080]      # si puo' cambiare quando lo applichi: --size 1080x1920
+  fps: 60
+
+# Come entrano i media: vale per tutti gli slot.
+style:
+  fit: cover              # contain = interi, con le bande; cover = a tutto schermo, tagliando i bordi
+  background: [0, 0, 0]   # colore delle bande
+  fade_in: 0              # secondi di dissolvenza dal nero all'inizio
+  fade_out: 0.25          # secondi di dissolvenza al nero alla fine
+
+# Lo stile dei testi che metterai negli edit. Ogni testo puo' cambiarlo.
+text:
+  font: Impact, Inter Display Black, Inter Black, DejaVu Sans Bold, Arial Bold, arialbd
+  font_size: 54
+  color: '#f20204'
+  stroke_color: white
+  stroke_width: 2
+  max_width: 0.9
+  align: center
+
+source:                 # da dove e' stato estratto: solo memoria
+  file: jumpstyle-bootleg.mp4
+  duration: 28.33
+  extracted: 2026-10-21
+  note: montaggio su TikTok, "il Marocco primo in Africa"
+
+# ---------------------------------------------------------------------------
+# SLOT: 61 posti da riempire, in quest'ordine.
+#
+# hint dice cosa c'era in quel posto nel video di riferimento: un video
+# (contenuto in movimento) o un'immagine ferma. E' un consiglio, non un
+# obbligo. motion vale solo se in quello slot finisce una FOTO.
+# ---------------------------------------------------------------------------
+slots:
+  - at: 0.0               #  1)  dura 0.66s, 1.22 battiti
+    hint: image
+    label: apertura
+  - at: 0.66              #  2)  dura 1.08s, 2.00 battiti
+    hint: video
+  - at: 1.739             #  3)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 2.278             #  4)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-1
+  - at: 2.818             #  5)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 3.357             #  6)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 3.897             #  7)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 4.436             #  8)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-2
+  - at: 4.976             #  9)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 5.516             # 10)  dura 0.15s, 0.28 battiti
+    label: collage
+  - at: 5.667             # 11)  dura 0.25s, 0.46 battiti
+  - at: 5.917             # 12)  dura 0.32s, 0.59 battiti
+  - at: 6.233             # 13)  dura 0.36s, 0.67 battiti
+  - at: 6.595             # 14)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-3
+  - at: 7.134             # 15)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 7.674             # 16)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 8.213             # 17)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 8.753             # 18)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-4
+  - at: 9.293             # 19)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 9.832             # 20)  dura 0.15s, 0.28 battiti
+    label: collage
+  - at: 9.983             # 21)  dura 0.25s, 0.46 battiti
+  - at: 10.233            # 22)  dura 0.32s, 0.59 battiti
+  - at: 10.55             # 23)  dura 0.36s, 0.67 battiti
+  - at: 10.911            # 24)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-5
+  - at: 11.451            # 25)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 11.991            # 26)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 12.53             # 27)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 13.07             # 28)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-6
+  - at: 13.609            # 29)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 14.149            # 30)  dura 0.15s, 0.28 battiti
+    label: collage
+  - at: 14.3              # 31)  dura 0.25s, 0.46 battiti
+  - at: 14.55             # 32)  dura 0.28s, 0.52 battiti
+  - at: 14.833            # 33)  dura 0.39s, 0.73 battiti
+  - at: 15.228            # 34)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-7
+  - at: 15.768            # 35)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 16.307            # 36)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 16.847            # 37)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 17.386            # 38)  dura 0.16s, 0.30 battiti
+    label: sezione-8
+  - at: 17.55             # 39)  dura 0.38s, 0.70 battiti
+  - at: 17.926            # 40)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 18.465            # 41)  dura 0.18s, 0.34 battiti
+    label: collage
+  - at: 18.65             # 42)  dura 0.22s, 0.40 battiti
+  - at: 18.867            # 43)  dura 0.32s, 0.59 battiti
+  - at: 19.183            # 44)  dura 0.36s, 0.67 battiti
+  - at: 19.544            # 45)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-9
+  - at: 20.084            # 46)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 20.624            # 47)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 21.163            # 48)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 21.703            # 49)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-10
+  - at: 22.242            # 50)  dura 0.54s, 1.00 battiti
+    hint: image
+  - at: 22.782            # 51)  dura 0.17s, 0.31 battiti
+    label: collage
+  - at: 22.95             # 52)  dura 0.25s, 0.46 battiti
+  - at: 23.2              # 53)  dura 0.32s, 0.59 battiti
+  - at: 23.517            # 54)  dura 0.34s, 0.64 battiti
+  - at: 23.861            # 55)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-11
+  - at: 24.401            # 56)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 24.94             # 57)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 25.48             # 58)  dura 0.54s, 1.00 battiti
+    hint: video
+  - at: 26.019            # 59)  dura 0.54s, 1.00 battiti
+    hint: video
+    label: sezione-12
+  - at: 26.559            # 60)  dura 0.67s, 1.25 battiti
+    hint: video
+  - at: 27.233            # 61)  dura 1.09s, 2.03 battiti
+    hint: video
+    label: chiusura
