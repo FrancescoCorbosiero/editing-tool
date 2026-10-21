@@ -344,6 +344,22 @@ def test_riconosce_bande_e_dissolvenza_finale(tmp_path):
     assert [s.hint for s in template.slots] == ["image", "image", "image"]
 
 
+def test_i_lampi_si_tengono_solo_se_lo_si_chiede(tmp_path):
+    """
+    Un lampo di tre fotogrammi di norma si fonde con l'inquadratura vicina.
+    Con un min_slot piu' basso deve restare: e anche il rilevatore, che di suo
+    scarta le inquadrature sotto i 0.2s, deve lasciarlo passare, altrimenti
+    min_slot non recupererebbe niente.
+    """
+    sorgente = video_montato(tmp_path, [2.0, 0.1, 1.9, 2.0])
+    normale = extract(sorgente, tmp_path / "normale").template
+    fitto = extract(sorgente, tmp_path / "fitto", min_slot=0.08).template
+
+    assert len(normale.slots) == 3
+    assert len(fitto.slots) == 4
+    assert fitto.gaps()[1] == pytest.approx(0.1, abs=0.04)
+
+
 def test_un_video_senza_audio_non_produce_un_template_audio(tmp_path):
     sorgente = video_montato(tmp_path, [1.0, 1.0], con_audio=False)
     with pytest.raises(TemplateError, match="non ha una traccia audio"):

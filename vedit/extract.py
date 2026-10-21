@@ -428,8 +428,11 @@ def extract(source: str | Path, destination: str | Path, name: str = "",
             "un'altra musica non avrebbe senso trapiantarlo"
         )
 
-    # 2. I tagli.
-    shots = scenes.analyze(source, sensitivity=sensitivity)
+    # 2. I tagli. Il rilevatore fonde da solo le inquadrature piu' corte del suo
+    #    minimo: se si chiedono slot piu' brevi, deve vederli anche lui,
+    #    altrimenti `min_slot` non recupererebbe niente.
+    shots = scenes.analyze(source, sensitivity=sensitivity,
+                           min_shot=min(scenes.MIN_SHOT, min_slot))
     if not shots.cuts:
         warnings.append(
             "Nessun taglio rilevato: il template avra' un solo slot. Se il video "
@@ -661,8 +664,8 @@ def describe(result: Extraction, destination: Path) -> str:
 
     lines += [
         "",
-        f"Servono {len(template.slots)} media (o meno: si ripetono). Provalo con:",
-        f"  python -m vedit apply {destination} <i tuoi file> --preview",
+        f"Servono {len(template.slots)} media (o meno: si ripetono). Un video nuovo:",
+        f"  vedit new edits/mio-video --template {Path(destination).as_posix()}",
     ]
     return "\n".join(lines)
 
