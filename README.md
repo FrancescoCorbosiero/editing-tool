@@ -90,12 +90,12 @@ per riga, con un commento che dice quando entra, quanto dura e cosa c'era lì ne
 di riferimento.
 
 ```yaml
-template: ../../templates/raffica      # 28 posti, 151.5 BPM, 18.13s, 720x1280
+template: ../../templates/raffica      # 32 posti, 151.5 BPM, 18.13s, 720x1280
 
 media:
-  - media/01.mp4                 #  1)    0.00s  dura 4.06s  video
-  - media/02.jpg                 #  2)    4.06s  dura 0.59s
-  - media/03.jpg                 #  3)    4.65s  dura 0.40s
+  - media/01.mp4                 #  1)    0.00s  dura 3.86s  video  [apertura]
+  - media/02.jpg                 #  2)    3.86s  dura 0.20s
+  - media/03.jpg                 #  3)    4.06s  dura 0.20s
   ...
 
 texts: []
@@ -135,7 +135,7 @@ texts:
     duration: 2.5
     position: bottom
   - text: "Funziona davvero?"
-    slot: 21
+    slot: 25
     bg_color: black
     bg_opacity: 0.6
     padding: 16
@@ -195,12 +195,13 @@ Traccia  : audio.m4a  (18.13s)
 Tempo    : 151.5 BPM  (un battito ogni 0.396s, il primo a 0.100s)
 Formato  : 720x1280 @ 30 fps
 Stile    : media interi su rgb(0, 0, 0) (contain), si spegne nel nero in 1.97s
-Slot     : 28  (il piu' corto 0.26s, il piu' lungo 4.06s)
-Griglia  : half - 25 tagli riallineati al battito, in media di 26 ms
+Slot     : 32  (il piu' corto 0.17s, il piu' lungo 3.86s)
+Griglia  : half - 26 tagli riallineati al battito, in media di 26 ms
 
   #   entra a   dura   battiti  transizione  nel riferimento  movimento
-  1      0.00   4.06s    10.25  cut          video            -
-  2      4.06   0.59s     1.50  cut          -                -
+  1      0.00   3.86s     9.75  cut          video            -
+  2      3.86   0.20s     0.50  cut          -                -
+  3      4.06   0.20s     0.50  cut          -                -
   ...
 ```
 
@@ -277,20 +278,20 @@ niente. Non importa nemmeno MoviePy: risponde in un attimo.
 ```
 $ vedit render edits/ormone --check
   #   entra a   dura   media
-  1      0.00   4.06s  apertura.mp4
-  2      4.06   0.59s  grafico.png
+  1      0.00   3.86s  apertura.mp4
+  2      3.86   0.20s  grafico.png
  ...
- 11      7.82   0.40s  onda.gif   (in loop)
+ 14      7.82   0.40s  onda.gif   (in loop)
 
   #  inizio     fine    durata  transizione  tipo   segmento
-  0  0:00.00  0:04.06     4.06s  -    video  apertura  apertura.mp4  [0 -> 4.06]  muto  720x1280
+  0  0:00.00  0:03.86     3.86s  -    video  apertura  apertura.mp4  [0 -> 3.86]  muto  720x1280
  ...
 Durata totale: 0:18.13  (18.13s, 543 fotogrammi)
 Dissolvenze : al nero negli ultimi 1.97s
 
 Sopra il montaggio (2):
    inizio     fine  dove      cosa
-  0:04.06  0:07.13  top       L'ormone della crescita
+  0:03.86  0:06.24  top       L'ormone della crescita
   0:11.78  0:13.76  center    Funziona davvero?
 
 Avvisi (1):

@@ -55,7 +55,7 @@ texts:
     slot: 2-8             # QUANDO: un posto (3), un intervallo (2-8), oppure at: 4.2 (+ duration)
     position: top         # DOVE: top, center, bottom, un numero 0-1 (altezza) o [x, y]
   - text: "Funziona davvero?"
-    slot: 21
+    slot: 25
     bg_color: black       # stile: solo se serve cambiare quello del template
     bg_opacity: 0.6
     padding: 16
