@@ -70,3 +70,39 @@ def test_le_cifre_del_riepilogo_coincidono_con_quelle_del_montaggio():
         assert round(clip.duration, 6) == round(report.duration, 6)
     finally:
         close_all()
+
+
+def test_con_contain_una_foto_larga_quanto_il_canvas_non_si_ingrandisce(tmp_path):
+    """
+    720x864 in un canvas 720x1280: con `contain` entra intera senza ingrandirsi,
+    e avvisare sarebbe solo rumore. Con `cover` invece va ingrandita.
+    """
+    from PIL import Image
+
+    foto = tmp_path / "f.png"
+    Image.new("RGB", (720, 864), (100, 100, 100)).save(foto)
+
+    def avvisi(fit):
+        project = Project.from_dict({
+            "output": {"size": [720, 1280]},
+            "timeline": [{"type": "image", "src": str(foto), "duration": 1, "fit": fit}],
+        })
+        return [w for w in analyze(project).warnings if "ingrandito" in w]
+
+    assert avvisi("contain") == []
+    assert len(avvisi("cover")) == 1 and "1.5 volte" in avvisi("cover")[0]
+
+
+def test_il_riepilogo_elenca_i_testi_sopra_il_montaggio():
+    project = Project.from_dict({
+        "timeline": [{"type": "color", "duration": 4}],
+        "overlays": [
+            {"type": "text", "text": "ciao", "start": 1, "duration": 2, "position": "top"},
+            {"type": "text", "text": "dopo la fine", "start": 9},
+        ],
+    })
+    report = analyze(project)
+    primo = report.overlays[0]
+    assert (primo.start, primo.end, primo.position) == (1.0, 3.0, "top")
+    assert any("dopo la fine del montaggio" in w for w in report.warnings)
+    assert "Sopra il montaggio (2)" in format_report(report)

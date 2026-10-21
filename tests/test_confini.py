@@ -15,7 +15,8 @@ RADICE = Path(__file__).resolve().parent.parent   # la cartella che contiene ved
 MODULI_LEGGERI = ["vedit.models", "vedit.timeline", "vedit.transitions",
                   "vedit.report", "vedit.ffmpeg_tools", "vedit.beats",
                   "vedit.fonts", "vedit.text", "vedit.motion",
-                  "vedit.scenes", "vedit.templates", "vedit.extract"]
+                  "vedit.scenes", "vedit.templates", "vedit.extract",
+                  "vedit.edit", "vedit.sheet"]
 
 
 def importa_e_controlla(modulo: str) -> subprocess.CompletedProcess:

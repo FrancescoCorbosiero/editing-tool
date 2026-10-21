@@ -102,3 +102,43 @@ jobs:
           finally:
               clip.close()
           PY
+
+      - name: Un edit con testi e una GIF, da capo a fondo
+        # new -> edit.yaml con un testo -> --check -> render -> verifica che i
+        # tagli cadano sugli istanti e che il testo si veda dove deve.
+        run: |
+          ffmpeg -v error -f lavfi -i "testsrc2=size=120x120:rate=10:duration=0.6" /tmp/media_onda.gif
+          vedit new /tmp/edit --template /tmp/tpl /tmp/media_green.mp4 /tmp/media_onda.gif \
+                    /tmp/media_cyan.mp4
+          python - <<'PY'
+          import yaml
+          path = "/tmp/edit/edit.yaml"
+          edit = yaml.safe_load(open(path))
+          edit["texts"] = [{"text": "CIAO", "slot": 3, "position": "center",
+                            "color": "white", "stroke_color": "black", "stroke_width": 2}]
+          yaml.safe_dump(edit, open(path, "w"))
+          PY
+          vedit render /tmp/edit --check
+          vedit render /tmp/edit -o /tmp/edit/output/edit.mp4
+
+          python - <<'PY'
+          import numpy as np, yaml
+          from moviepy import VideoFileClip
+
+          template = yaml.safe_load(open("/tmp/tpl/template.yaml"))
+          istanti = [s["at"] for s in template["slots"]]
+          clip = VideoFileClip("/tmp/edit/output/edit.mp4")
+          try:
+              for at in istanti[1:]:
+                  prima = clip.get_frame(at - 0.05).mean(axis=(0, 1))
+                  dopo = clip.get_frame(at + 0.05).mean(axis=(0, 1))
+                  assert np.abs(prima - dopo).max() > 20, f"nessun taglio a {at}"
+              # Il testo sta al centro del posto 3, che e' ciano: li' i pixel
+              # bianchi possono venire solo dalle lettere.
+              meta = (istanti[2] + template["duration"]) / 2
+              centro = clip.get_frame(meta)[70:110, 120:200]
+              assert (centro.min(axis=2) > 230).sum() > 30, "il testo non si vede"
+              print("OK: tagli sugli istanti e testo visibile")
+          finally:
+              clip.close()
+          PY

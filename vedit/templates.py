@@ -127,6 +127,12 @@ class MediaRef:
     path: Path
     start: float = 0.0
     loop: bool | None = None       # None = deciso dal tipo di file (le GIF si', i video no)
+    # Le scelte di un edit per QUESTO media, che vincono su quelle dello slot.
+    # None = decide il template; motion "" = nessun movimento, anche se lo
+    # slot ne suggerisce uno.
+    fit: str | None = None
+    motion: str | None = None
+    amount: float | None = None
 
     @classmethod
     def parse(cls, value: str) -> MediaRef:
@@ -631,9 +637,10 @@ def bind(template: Template, media: list[MediaRef], output: Path | str | None = 
                 # chiuda: deve dire da solo dove finisce.
                 segmento["end"] = round(ref.start + span * speed, 3)
         else:
-            if slot.motion:
-                segmento["motion"] = slot.motion
-                segmento["amount"] = slot.amount
+            movimento = slot.motion if ref.motion is None else ref.motion
+            if movimento:
+                segmento["motion"] = movimento
+                segmento["amount"] = ref.amount if ref.amount is not None else slot.amount
             if ultimo:
                 segmento["duration"] = round(span, 3)
 
@@ -646,7 +653,7 @@ def bind(template: Template, media: list[MediaRef], output: Path | str | None = 
         # sempre il canvas da solo (vedi motion.py), e dichiararlo produrrebbe
         # solo un avviso in --check.
         if not segmento.get("motion"):
-            segmento["fit"] = slot.fit or template.style.fit
+            segmento["fit"] = ref.fit or slot.fit or template.style.fit
 
         timeline.append(segmento)
         bindings.append(Binding(slot=slot, media=ref, span=span, speed=speed,
@@ -725,8 +732,9 @@ def describe_bound(template: Template, bound: Bound) -> str:
             dettagli.append(f"rallentato {binding.speed:g}x")
         if binding.loop:
             dettagli.append("in loop")
-        if binding.media.kind == "image" and binding.slot.motion:
-            dettagli.append(binding.slot.motion)
+        movimento = binding.slot.motion if binding.media.motion is None else binding.media.motion
+        if binding.media.kind == "image" and movimento:
+            dettagli.append(movimento)
         if binding.slot.transition > 0 and i > 0:
             dettagli.append(f"{binding.slot.transition_type} {binding.slot.transition:g}s")
 

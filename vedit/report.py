@@ -53,6 +53,16 @@ class SegmentRow:
 
 
 @dataclass
+class OverlayRow:
+    """Una riga del riepilogo degli overlay: un testo o un'immagine sopra il montaggio."""
+
+    start: float
+    end: float
+    position: str
+    detail: str
+
+
+@dataclass
 class Report:
     project_path: Path
     output_path: Path
@@ -60,6 +70,7 @@ class Report:
     fps: int
     rows: list[SegmentRow] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    overlays: list[OverlayRow] = field(default_factory=list)
     fade_in: float = 0.0
     fade_out: float = 0.0
 
@@ -134,12 +145,16 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
     requests: list[TransitionRequest] = []
     infos: list[dict | None] = []
 
+    ingranditi: set[Path] = set()
     for i, seg in enumerate(project.timeline):
         info = None
         if seg.src is not None:
             source = project.resolve(seg.src)
-            kinds[source] = seg.type
+            # Una GIF ha per natura risoluzione e frame rate suoi: confrontarla
+            # con le riprese produrrebbe solo avvisi da ignorare.
+            kinds[source] = "gif" if source.suffix.lower() == ".gif" else seg.type
             info = _probe_cached(source, cache)
+            _check_upscale(report, project, seg, source, info, ingranditi)
         infos.append(info)
 
         source_duration = info["duration"] if info else None
@@ -215,7 +230,36 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
     _check_sources_consistency(report, project, cache, kinds)
     _check_audio(report, project, cache)
     _check_fades(report, project)
+    _list_overlays(report, project)
     return report
+
+
+def _position_label(position) -> str:
+    """Come si legge una posizione nel riepilogo."""
+    if isinstance(position, dict):
+        return f"{position['x']:g},{position['y']:g}"
+    if isinstance(position, (list, tuple)):
+        return ",".join(str(p) for p in position)
+    return str(position)
+
+
+def _list_overlays(report: Report, project: Project) -> None:
+    """Gli overlay con i loro tempi, e quelli che non si vedrebbero."""
+    for i, ov in enumerate(project.overlays):
+        fine = report.duration if ov.duration is None else ov.start + ov.duration
+        if ov.type == "text":
+            dettaglio = ov.text.replace("\n", " / ")
+        else:
+            dettaglio = f"immagine {Path(ov.src).name}"
+        report.overlays.append(OverlayRow(
+            start=ov.start, end=min(fine, report.duration),
+            position=_position_label(ov.position), detail=dettaglio,
+        ))
+        if ov.start >= report.duration:
+            report.warnings.append(
+                f"overlays[{i}]: comincia a {ov.start:g}s, dopo la fine del montaggio "
+                f"({report.duration:.2f}s): non si vedra'"
+            )
 
 
 def _check_fades(report: Report, project: Project) -> None:
@@ -226,6 +270,31 @@ def _check_fades(report: Report, project: Project) -> None:
             f"le dissolvenze dal nero ({project.fade_in:g}s) e al nero "
             f"({project.fade_out:g}s) durano piu' del montaggio ({report.duration:.2f}s): "
             "si sovrapporranno e il video non arrivera' mai alla luce piena"
+        )
+
+
+def _check_upscale(report: Report, project: Project, seg: Segment, source: Path,
+                   info: dict | None, gia_detti: set[Path]) -> None:
+    """
+    Avvisa se un sorgente verra' ingrandito, cioe' mostrato meno nitido.
+
+    Quanto si ingrandisce dipende da come entra nel quadro: con `contain`
+    un'immagine larga quanto il canvas non si ingrandisce affatto anche se e'
+    meno alta, con `cover` deve riempire anche l'altra dimensione. Sotto il 10%
+    non se ne accorge nessuno.
+    """
+    if not info or not info.get("width") or source in gia_detti:
+        return
+    larghezza, altezza = project.output.size
+    rapporti = (larghezza / info["width"], altezza / info["height"])
+    fit = "cover" if seg.motion else (seg.fit or project.defaults.fit)
+    scala = min(rapporti) if fit == "contain" else max(rapporti)
+    if scala > 1.1:
+        gia_detti.add(source)
+        report.warnings.append(
+            f"{source.name}: {info['width']}x{info['height']} verra' ingrandito "
+            f"{scala:.1f} volte per entrare nel canvas {larghezza}x{altezza} "
+            f"({fit}): apparira' meno nitido"
         )
 
 
@@ -275,12 +344,6 @@ def _check_sources_consistency(
             if info.get("fps"):
                 rates.setdefault(round(float(info["fps"]), 2), []).append(name)
 
-        if info["width"] < project.output.size[0] or info["height"] < project.output.size[1]:
-            report.warnings.append(
-                f"{name}: {info['width']}x{info['height']} e' piu' piccolo del canvas "
-                f"{project.output.size[0]}x{project.output.size[1]}: verra' ingrandito "
-                "e apparira' meno nitido"
-            )
 
     if len(resolutions) > 1:
         detail = " · ".join(
@@ -353,6 +416,16 @@ def format_report(report: Report) -> str:
         dissolvenze.append(f"al nero negli ultimi {report.fade_out:g}s")
     if dissolvenze:
         lines.append(f"Dissolvenze : {', '.join(dissolvenze)}")
+
+    if report.overlays:
+        lines.append("")
+        lines.append(f"Sopra il montaggio ({len(report.overlays)}):")
+        lines.append("   inizio     fine  dove      cosa")
+        for row in report.overlays:
+            lines.append(
+                f"  {format_time(row.start):>7}  {format_time(row.end):>7}  "
+                f"{row.position:<8}  {row.detail}"
+            )
 
     if report.warnings:
         lines.append("")

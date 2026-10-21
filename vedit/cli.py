@@ -1,9 +1,11 @@
 """
 Interfaccia da riga di comando.
 
-    vedit extract riferimento.mp4 -o templates/nome     # video -> template
-    vedit apply templates/nome media/ --preview         # template + media -> video
-    vedit render timeline.yaml --check                  # riepilogo, senza renderizzare
+    vedit extract riferimento.mp4 -o templates/nome      # video -> template
+    vedit new edits/video --template templates/nome      # un edit nuovo sul template
+    vedit render edits/video --check                     # cosa cade dove, senza render
+    vedit render edits/video --preview                   # anteprima veloce
+    vedit sheet output/video.mp4 --slots templates/nome  # provini, per controllare
 """
 
 from __future__ import annotations
@@ -25,22 +27,74 @@ def setup_logging(verbose: bool) -> None:
     )
 
 
-def load_project(args: argparse.Namespace) -> Project:
+def media_durations(media) -> dict[Path, float]:
     """
-    Carica il progetto e verifica in blocco che i file referenziati esistano.
+    Le durate dei video e delle GIF fra i media, lette con ffprobe.
 
-    La verifica sta qui e non nel builder perche' deve avvenire PRIMA di
-    costruire qualsiasi cosa: meglio quattro percorsi sbagliati elencati
-    subito che un errore alla volta dopo trenta secondi di lavoro buttato.
+    Servono a scoprire SUBITO che un video e' troppo corto per lo slot in cui e'
+    finito, invece che a meta' export. I file che non esistono si saltano: li
+    elenca tutti insieme la verifica dei file, con un messaggio migliore di
+    quello che darebbe ffprobe.
     """
-    project = Project.from_yaml(args.project)
+    durate: dict[Path, float] = {}
+    for ref in media:
+        percorso = ref.path.resolve()
+        if ref.kind == "video" and percorso not in durate and percorso.exists():
+            durate[percorso] = probe(percorso)["duration"]
+    return durate
+
+
+def _read_yaml(path: Path) -> object:
+    import yaml
+
+    if not path.exists():
+        raise ConfigError(f"File non trovato: {path}")
+    with path.open("r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def load_project(args: argparse.Namespace) -> tuple[Project, str]:
+    """
+    Carica quello che c'e' da renderizzare: un timeline.yaml o un edit.yaml.
+
+    Un edit (un file con `template:`) si espande nel suo progetto, e si stampa
+    il piano: quale media in quale posto, quali testi quando. La verifica dei
+    file sta qui e non nel builder perche' deve avvenire PRIMA di costruire
+    qualsiasi cosa: meglio quattro percorsi sbagliati elencati subito che un
+    errore alla volta dopo trenta secondi di lavoro buttato.
+    """
+    from .edit import MANIFEST, Edit, is_edit
+
+    path = Path(args.project)
+    if path.is_dir():
+        path = path / MANIFEST
+    data = _read_yaml(path)
+
+    if is_edit(data):
+        edit = Edit.from_yaml(path)
+        bound = edit.bind(media_durations(edit.media))
+        # Con --check i testi li elenca gia' il riepilogo, insieme agli altri overlay.
+        print(edit.describe(bound, texts=not getattr(args, "check", False)))
+        print()
+        project = bound.project(edit.root)
+    else:
+        if getattr(args, "to_yaml", None):
+            raise ConfigError(
+                "--to-yaml espande un edit nel suo progetto: questo file e' gia' un progetto"
+            )
+        project = Project.from_yaml(path)
+
     project.validate_files()
-    return project
+    return project, str(path)
 
 
 def cmd_render(args: argparse.Namespace) -> int:
     ensure_ffmpeg()
-    project = load_project(args)
+
+    if args.to_yaml:
+        return _edit_to_yaml(args)
+
+    project, label = load_project(args)
 
     if args.output:
         project.output.path = Path(args.output)
@@ -49,7 +103,7 @@ def cmd_render(args: argparse.Namespace) -> int:
         # --check non renderizza: niente import di MoviePy, che costa secondi.
         from .report import analyze, format_report
 
-        print(format_report(analyze(project, args.project)))
+        print(format_report(analyze(project, label)))
         return 0
 
     from .builder import close_all, render  # import pigro: MoviePy e' lento da caricare
@@ -62,6 +116,28 @@ def cmd_render(args: argparse.Namespace) -> int:
     if target and target.exists():
         size_mb = target.stat().st_size / 1_000_000
         print(f"\nFatto: {target}  ({size_mb:.1f} MB)")
+    return 0
+
+
+def _edit_to_yaml(args: argparse.Namespace) -> int:
+    """Scrive il progetto in cui si espande un edit: la valvola per le modifiche a mano."""
+    from .edit import MANIFEST, Edit, is_edit
+    from .templates import to_yaml
+
+    path = Path(args.project)
+    if path.is_dir():
+        path = path / MANIFEST
+    if not is_edit(_read_yaml(path)):
+        raise ConfigError(
+            "--to-yaml espande un edit nel suo progetto: questo file e' gia' un progetto"
+        )
+    edit = Edit.from_yaml(path)
+    target = Path(args.to_yaml)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    bound = edit.bind(media_durations(edit.media), root=target.parent.resolve())
+    target.write_text(to_yaml(bound), encoding="utf-8")
+    print(f"Progetto scritto in {target}")
+    print(f"  vedit render {target} --preview")
     return 0
 
 
@@ -167,7 +243,7 @@ def cmd_templates(args: argparse.Namespace) -> int:
         tempo = f"{template.audio.bpm:g} BPM" if template.audio.bpm else "senza battito"
         print(f"  {cartella.name:<24} {template.duration:6.2f}s  "
               f"{len(template.slots):3d} slot  {tempo:<14} "
-              f"{template.size[0]}x{template.size[1]}")
+              f"{template.size[0]}x{template.size[1]}  {template.style.fit}")
     return 0
 
 
@@ -193,14 +269,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if mancanti:
         raise ConfigError("File non trovati:\n" + "\n".join(f"  - {p}" for p in mancanti))
 
-    # Le durate servono a scoprire SUBITO che un video e' troppo corto per lo
-    # slot in cui e' finito, invece che a meta' export.
-    durate: dict[Path, float] = {}
-    for ref in media:
-        percorso = ref.path.resolve()
-        if ref.kind == "video" and percorso not in durate:
-            durate[percorso] = probe(percorso)["duration"]
-
+    durate = media_durations(media)
     destinazione = Path(args.to_yaml).parent if args.to_yaml else Path.cwd()
     bound = bind(
         template, media,
@@ -246,6 +315,64 @@ def cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_new(args: argparse.Namespace) -> int:
+    """Crea un edit nuovo su un template: lo scheletro commentato, posto per posto."""
+    from .edit import MANIFEST, skeleton
+    from .templates import Template, expand_media
+
+    template = Template.from_yaml(args.template)
+    root = Path(args.directory)
+    target = root / MANIFEST
+    if target.exists() and not args.force:
+        raise ConfigError(f"Esiste gia': {target}  (usa --force per sovrascriverlo)")
+
+    media = expand_media(args.media) if args.media else None
+    for cartella in ("media", "output"):
+        (root / cartella).mkdir(parents=True, exist_ok=True)
+        (root / cartella / ".gitkeep").touch()
+    target.write_text(
+        skeleton(template, template.root, root.resolve(), root.name, media), encoding="utf-8"
+    )
+
+    print(f"Creato {target}  ({len(template.slots)} posti da riempire)")
+    if not media:
+        print(f"Metti i tuoi file in {root / 'media'}/ e scrivili nella lista 'media', poi:")
+    print(f"  vedit render {target} --check")
+    return 0
+
+
+def cmd_sheet(args: argparse.Namespace) -> int:
+    """Il foglio dei provini di un video: tutto il video in un'immagine."""
+    from .sheet import contact_sheet, regular_times
+
+    ensure_ffmpeg()
+    source = Path(args.video)
+    if not source.exists():
+        raise FileNotFoundError(source)
+
+    if args.slots:
+        from .templates import Template
+
+        template = Template.from_yaml(args.slots)
+        gaps = template.gaps()
+        times = [slot.at + gap / 2 for slot, gap in zip(template.slots, gaps, strict=True)]
+        labels = [f"{i + 1}) {t:.2f}s" for i, t in enumerate(times)]
+    elif args.shots:
+        from .scenes import analyze
+
+        shots = analyze(source).shots
+        times = [shot.middle for shot in shots]
+        labels = [f"{shot.index + 1}) {shot.start:.2f}s" for shot in shots]
+    else:
+        times = regular_times(probe(source)["duration"], args.every)
+        labels = [f"{t:.2f}s" for t in times]
+
+    output = Path(args.output) if args.output else Path("output") / f"{source.stem}-provini.png"
+    contact_sheet(source, times, labels, output, width=args.width, columns=args.columns)
+    print(f"Provini: {output}  ({len(times)} fotogrammi)")
+    return 0
+
+
 def cmd_fonts(args: argparse.Namespace) -> int:
     """Elenca i font utilizzabili: senza un font il testo su video non si disegna."""
     from .fonts import describe
@@ -262,8 +389,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true", help="log dettagliato")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_render = sub.add_parser("render", help="renderizza un progetto")
-    p_render.add_argument("project", help="percorso del timeline.yaml")
+    p_render = sub.add_parser("render", help="renderizza un edit o un progetto")
+    p_render.add_argument("project",
+                          help="un edit.yaml (o la sua cartella) oppure un timeline.yaml")
     p_render.add_argument("-o", "--output", help="sovrascrive output.path del YAML")
     p_render.add_argument("--preview", action="store_true",
                           help="anteprima veloce a bassa risoluzione")
@@ -272,6 +400,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.add_argument("--check", action="store_true",
                           help="valida il progetto e stampa il riepilogo della timeline, "
                                "senza costruire ne' esportare nulla")
+    p_render.add_argument("--to-yaml",
+                          help="per un edit: scrive il timeline.yaml in cui si espande, "
+                               "da correggere a mano, invece di renderizzare")
     p_render.set_defaults(func=cmd_render)
 
     p_probe = sub.add_parser("probe", help="mostra i metadati di un file")
@@ -362,6 +493,39 @@ def build_parser() -> argparse.ArgumentParser:
     p_apply.add_argument("--strict", action="store_true",
                          help="pretende esattamente un media per slot, invece di ripeterli")
     p_apply.set_defaults(func=cmd_apply)
+
+    p_new = sub.add_parser(
+        "new",
+        help="crea un edit nuovo su un template",
+        description="Crea una cartella con un edit.yaml commentato posto per posto, e le "
+                    "sottocartelle media/ e output/. Se gli passi dei file (o una cartella), "
+                    "li mette gia' nei posti, in ordine.",
+    )
+    p_new.add_argument("directory", help="la cartella dell'edit, es. edits/mio-video")
+    p_new.add_argument("--template", required=True, help="la cartella del template")
+    p_new.add_argument("media", nargs="*", help="i media da mettere nei posti (facoltativi)")
+    p_new.add_argument("--force", action="store_true", help="sovrascrive un edit.yaml esistente")
+    p_new.set_defaults(func=cmd_new)
+
+    p_sheet = sub.add_parser(
+        "sheet",
+        help="il foglio dei provini di un video: tanti fotogrammi in un'immagine",
+    )
+    p_sheet.add_argument("video", help="il video da guardare")
+    p_sheet.add_argument("-o", "--output",
+                         help="l'immagine da scrivere (default: output/<video>-provini.png)")
+    quali = p_sheet.add_mutually_exclusive_group()
+    quali.add_argument("--every", type=float,
+                       help="un provino ogni tot secondi (default: scelto sulla durata)")
+    quali.add_argument("--shots", action="store_true",
+                       help="un provino per inquadratura (per guardare un riferimento)")
+    quali.add_argument("--slots", metavar="TEMPLATE",
+                       help="un provino a meta' di ogni posto del template (per controllare "
+                            "un render)")
+    p_sheet.add_argument("--columns", type=int, default=6, help="provini per riga (default: 6)")
+    p_sheet.add_argument("--width", type=int, default=180,
+                         help="larghezza di ogni provino in pixel (default: 180)")
+    p_sheet.set_defaults(func=cmd_sheet)
 
     p_templates = sub.add_parser("templates", help="elenca i template disponibili")
     p_templates.add_argument("directory", nargs="?", default="templates",

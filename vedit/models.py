@@ -37,6 +37,59 @@ FIT_MODES = ("contain", "cover", "stretch")
 # percorso da verificare, qualsiasi altra stringa e' un nome di font di sistema.
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc", ".woff", ".woff2")
 
+# Le posizioni a parole di un overlay. Il testo si centra in orizzontale e
+# resta dentro la "safe area": la parte dello schermo che le app dei video
+# verticali non coprono con i loro pulsanti (in alto le schede, in basso la
+# didascalia e il nome dell'autore).
+POSITIONS = ("top", "center", "bottom")
+SAFE_TOP = 0.12       # il bordo alto del testo cade al 12% dell'altezza
+SAFE_BOTTOM = 0.22    # il bordo basso resta sopra l'ultimo 22% dello schermo
+
+
+def place(position: Any, item_size: tuple[int, int],
+          canvas_size: tuple[int, int]) -> Any:
+    """
+    Dove va l'angolo in alto a sinistra di un overlay grande `item_size`.
+
+    Tre forme, e non si confondono:
+      - una parola fra POSITIONS: le posizioni pronte, dentro la safe area;
+      - `{x, y}` in frazioni del quadro: li' va il CENTRO dell'overlay, che
+        viene poi tenuto dentro lo schermo (un testo largo vicino al bordo non
+        deve uscire);
+      - una lista `[x, y]` in pixel, o le forme di MoviePy come
+        `["center", "top"]`: passano cosi' come sono.
+    """
+    w, h = item_size
+    width, height = canvas_size
+    if position == "top":
+        return (width - w) // 2, round(height * SAFE_TOP)
+    if position == "bottom":
+        return (width - w) // 2, round(height * (1 - SAFE_BOTTOM)) - h
+    if position == "center":
+        return (width - w) // 2, (height - h) // 2
+    if isinstance(position, dict):
+        x = round(position["x"] * width - w / 2)
+        y = round(position["y"] * height - h / 2)
+        return min(max(x, 0), max(width - w, 0)), min(max(y, 0), max(height - h, 0))
+    return position
+
+
+def _parse_position(value: Any, where: str) -> Any:
+    """Valida una posizione del YAML; le frazioni diventano un dizionario {x, y}."""
+    if isinstance(value, dict):
+        try:
+            x, y = float(value["x"]), float(value["y"])
+        except (KeyError, TypeError, ValueError):
+            raise ConfigError(
+                f"{where}: position in frazioni vuole x e y, es. {{x: 0.5, y: 0.3}}"
+            ) from None
+        if not (0 <= x <= 1 and 0 <= y <= 1):
+            raise ConfigError(f"{where}: position x e y sono frazioni del quadro, fra 0 e 1")
+        return {"x": x, "y": y}
+    if isinstance(value, list):
+        return tuple(value)
+    return value
+
 
 def _looks_like_font_file(value: str) -> bool:
     return Path(value).suffix.lower() in FONT_SUFFIXES
@@ -414,9 +467,9 @@ class TextStyle:
 @dataclass
 class Overlay:
     """
-    Elemento sovrapposto al montaggio finale (logo, watermark, cartello...).
-    Le coordinate sono in pixel sul canvas di output, oppure stringhe
-    come "center", "left", "top".
+    Elemento sovrapposto al montaggio finale: un testo, un logo, un cartello.
+    La posizione e' una parola (top, center, bottom), le frazioni {x, y} del
+    punto in cui centrarlo, oppure [x, y] in pixel: vedi `place`.
     """
 
     type: str                      # "image" | "text"
@@ -426,7 +479,7 @@ class Overlay:
     duration: float | None = None  # None = fino alla fine del video
     width: int | None = None
     height: int | None = None
-    position: Any = "center"       # [x, y] oppure "center" / ["center", "top"]
+    position: Any = "center"       # parola, {x, y} in frazioni, oppure [x, y] in pixel
     fade: float = 0.0              # dissolvenza in entrata e uscita
     opacity: float = 1.0
     style: TextStyle = field(default_factory=TextStyle)
@@ -453,8 +506,7 @@ class Overlay:
             if data.get(key) is not None:
                 setattr(ov, key, int(data[key]))
         if "position" in data:
-            pos = data["position"]
-            ov.position = tuple(pos) if isinstance(pos, list) else pos
+            ov.position = _parse_position(data["position"], where)
 
         return ov
 

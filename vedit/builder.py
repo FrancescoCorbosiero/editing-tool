@@ -29,7 +29,7 @@ from moviepy import (
 )
 
 from . import motion, transitions
-from .models import AudioSpec, Overlay, Project, Segment, TextStyle
+from .models import AudioSpec, Overlay, Project, Segment, TextStyle, place
 from .motion import MotionContext
 from .progress import RenderProgress, format_duration
 from .text import render_text
@@ -235,8 +235,8 @@ def concat_with_transitions(clips: list, requests: list[TransitionRequest],
                                              durations[i - 1] if i else 0.0, durations[i])
 
     placed: list = []
-    for i, (clip, place) in enumerate(zip(clips, placements, strict=True)):
-        current = clip.with_start(place.start)
+    for i, (clip, placement) in enumerate(zip(clips, placements, strict=True)):
+        current = clip.with_start(placement.start)
 
         if i > 0 and effective[i] > 0:
             ctx = TransitionContext(
@@ -288,7 +288,8 @@ def build_overlay(ov: Overlay, project: Project, video_duration: float):
         clip = make_text_clip(ov.text, ov.style, project.output.size[0], duration,
                               root=project.root)
 
-    clip = clip.with_start(ov.start).with_position(ov.position)
+    clip = clip.with_start(ov.start).with_position(place(ov.position, clip.size,
+                                                         project.output.size))
 
     if ov.opacity < 1.0:
         clip = clip.with_opacity(ov.opacity)
