@@ -169,6 +169,13 @@ def test_un_testo_senza_quando(repo):
         Edit.from_yaml(scrivi_edit(repo, texts=[{"text": "ciao"}]))
 
 
+def test_un_numero_scritto_a_parole_e_un_errore_leggibile(repo):
+    with pytest.raises(ConfigError, match="at deve essere un numero"):
+        Edit.from_yaml(scrivi_edit(repo, texts=[{"text": "ciao", "at": "dopo"}]))
+    with pytest.raises(ConfigError, match="start deve essere un numero"):
+        Edit.from_yaml(scrivi_edit(repo, media=[{"src": "media/01.jpg", "start": "inizio"}]))
+
+
 def test_un_testo_con_slot_e_at_insieme(repo):
     with pytest.raises(ConfigError, match="non tutti e due"):
         Edit.from_yaml(scrivi_edit(repo, texts=[{"text": "ciao", "slot": 1, "at": 1}]))
@@ -255,6 +262,19 @@ def test_un_media_con_la_chiocciola_parte_da_quel_secondo(repo):
 def test_un_media_scritto_male(repo):
     with pytest.raises(ConfigError, match="campi sconosciuti"):
         Edit.from_yaml(scrivi_edit(repo, media=[{"src": "media/01.jpg", "strat": 3}]))
+
+
+def test_fit_e_motion_sbagliati_si_dicono_con_il_numero_del_media(repo):
+    with pytest.raises(ConfigError, match=r"media\[1\]: fit"):
+        Edit.from_yaml(scrivi_edit(repo, media=["media/01.jpg", {"src": "media/02.jpg", "fit": "zoom"}]))
+    with pytest.raises(ConfigError, match=r"media\[0\]: motion 'giravolta'"):
+        Edit.from_yaml(scrivi_edit(repo, media=[{"src": "media/01.jpg", "motion": "giravolta"}]))
+
+
+def test_motion_none_toglie_il_movimento_del_template(repo):
+    edit = Edit.from_yaml(scrivi_edit(repo, media=[{"src": "media/01.jpg", "motion": "none"}]))
+    assert edit.media[0].motion == ""
+    assert "motion" not in edit.bind().data["timeline"][0]
 
 
 def test_lo_stile_del_template_arriva_nel_progetto(repo):

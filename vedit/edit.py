@@ -52,7 +52,8 @@ from typing import Any
 
 import yaml
 
-from .models import ConfigError, Project, TextStyle, _raise_all
+from .models import FIT_MODES, ConfigError, Project, TextStyle, _raise_all
+from .motion import names as motion_names
 from .templates import (
     Bound,
     MediaRef,
@@ -82,6 +83,14 @@ PIXEL_KEYS = ("font_size", "stroke_width", "padding")
 
 # Sotto questa durata un testo non si fa in tempo a leggerlo.
 MIN_TEXT = 0.1
+
+
+def _number(item: dict, key: str, where: str) -> float:
+    """Un campo numerico, con un errore leggibile se c'e' scritto altro."""
+    try:
+        return float(item[key])
+    except (TypeError, ValueError):
+        raise ConfigError(f"{where}: {key} deve essere un numero (trovato '{item[key]}')") from None
 
 
 def _slot_range(value: Any, count: int, where: str) -> tuple[int, int]:
@@ -186,7 +195,7 @@ def parse_text(item: Any, template: Template, index: int) -> TextCue:
         primo, ultimo = _slot_range(item["slot"], len(slots), where)
         start, end = slots[primo - 1].at, fini[ultimo - 1]
     elif "at" in item:
-        start = float(item["at"])
+        start = _number(item, "at", where)
         if not 0 <= start < template.duration:
             raise ConfigError(
                 f"{where}: at {start:g} e' fuori dal video, che dura {template.duration:g}s"
@@ -199,7 +208,7 @@ def parse_text(item: Any, template: Template, index: int) -> TextCue:
         )
 
     if item.get("duration") is not None:
-        durata = float(item["duration"])
+        durata = _number(item, "duration", where)
         if durata <= 0:
             raise ConfigError(f"{where}: duration deve essere positiva")
         end = start + durata
@@ -209,7 +218,7 @@ def parse_text(item: Any, template: Template, index: int) -> TextCue:
             f"{where}: il testo durerebbe {end - start:.2f}s, troppo poco per leggerlo"
         )
 
-    fade = float(item.get("fade") or 0.0)
+    fade = _number(item, "fade", where) if item.get("fade") is not None else 0.0
     if fade < 0:
         raise ConfigError(f"{where}: fade non puo' essere negativo")
 
@@ -244,17 +253,24 @@ def parse_media(item: Any, root: Path, index: int) -> MediaRef:
             raise ConfigError(f"{where}: manca 'src', il percorso del file")
         ref = MediaRef.parse(str(item["src"]))
         if item.get("start") is not None:
-            ref.start = float(item["start"])
+            ref.start = _number(item, "start", where)
         if item.get("loop") is not None:
             ref.loop = bool(item["loop"])
         if item.get("fit") is not None:
             ref.fit = str(item["fit"]).strip().lower()
+            if ref.fit not in FIT_MODES:
+                raise ConfigError(f"{where}: fit deve essere uno di {', '.join(FIT_MODES)}")
         if "motion" in item:
             # `motion: none` (o vuoto) toglie il movimento suggerito dal template.
             valore = item["motion"]
             ref.motion = "" if valore in (None, "", "none") else str(valore).strip().lower()
+            if ref.motion and ref.motion not in motion_names():
+                raise ConfigError(
+                    f"{where}: motion '{ref.motion}' non esiste. "
+                    f"Disponibili: {', '.join(motion_names())}, oppure none"
+                )
         if item.get("amount") is not None:
-            ref.amount = float(item["amount"])
+            ref.amount = _number(item, "amount", where)
     else:
         raise ConfigError(f"{where}: ogni media e' un percorso o una mappa con 'src'")
 
