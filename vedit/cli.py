@@ -1,10 +1,9 @@
 """
 Interfaccia da riga di comando.
 
-    python -m vedit render projects/demo/timeline.yaml
-    python -m vedit render projects/demo/timeline.yaml --preview
-    python -m vedit probe assets/input.mp4
-    python -m vedit init progetti/mio-video
+    vedit extract riferimento.mp4 -o templates/nome     # video -> template
+    vedit apply templates/nome media/ --preview         # template + media -> video
+    vedit render timeline.yaml --check                  # riepilogo, senza renderizzare
 """
 
 from __future__ import annotations
@@ -12,14 +11,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import shutil
 import sys
 from pathlib import Path
 
 from .ffmpeg_tools import FFmpegError, ensure_ffmpeg, probe
 from .models import ConfigError, Project
-
-TEMPLATE = Path(__file__).resolve().parent.parent / "projects" / "demo" / "timeline.yaml"
 
 
 def setup_logging(verbose: bool) -> None:
@@ -59,8 +55,7 @@ def cmd_render(args: argparse.Namespace) -> int:
     from .builder import close_all, render  # import pigro: MoviePy e' lento da caricare
 
     try:
-        target = render(project, dry_run=args.dry_run, preview=args.preview,
-                        use_proxy=args.use_proxy)
+        target = render(project, dry_run=args.dry_run, preview=args.preview)
     finally:
         close_all()
 
@@ -83,45 +78,6 @@ def cmd_probe(args: argparse.Namespace) -> int:
     print(f"Video     : {info['video_codec']}")
     print(f"Audio     : {info['audio_codec'] or 'assente'}")
     print(f"Dimensione: {info['size_bytes'] / 1_000_000:.1f} MB")
-    return 0
-
-
-def cmd_proxy(args: argparse.Namespace) -> int:
-    """Genera le copie leggere dei sorgenti su cui montare."""
-    import time
-
-    from .proxies import build_all, proxy_dir, total_size
-
-    ensure_ffmpeg()
-    project = load_project(args)
-
-    started = time.monotonic()
-    print(f"Proxy a {args.height}p in {proxy_dir(project)}\n")
-
-    # La riga "in corso" si riscrive solo se siamo in un terminale: dentro un
-    # file di log il ritorno carrello non cancella niente e sporca l'output.
-    tty = sys.stdout.isatty()
-
-    def annuncia(source: Path) -> None:
-        if tty:
-            print(f"  {source.name:<40} in corso...", end="\r", flush=True)
-
-    def riporta(result) -> None:
-        print(f"  {result.source.name:<40} {result.status}".ljust(70))
-
-    results = build_all(project, height=args.height, force=args.force,
-                        on_start=annuncia, on_done=riporta)
-
-    creati = sum(1 for r in results if r.created)
-    elapsed = time.monotonic() - started
-    print(
-        f"\n{len(results)} {'sorgente' if len(results) == 1 else 'sorgenti'} · "
-        f"{creati} generati ora · {total_size(results) / 1_000_000:.1f} MB in "
-        f"{proxy_dir(project).name}/ · {elapsed:.1f}s"
-    )
-    if results:
-        print("Ora monta con: python -m vedit render "
-              f"{args.project} --preview --use-proxy")
     return 0
 
 
@@ -298,22 +254,6 @@ def cmd_fonts(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_init(args: argparse.Namespace) -> int:
-    target_dir = Path(args.directory)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / "timeline.yaml"
-
-    if target.exists() and not args.force:
-        print(f"Esiste gia': {target}  (usa --force per sovrascrivere)", file=sys.stderr)
-        return 1
-
-    shutil.copy(TEMPLATE, target)
-    print(f"Creato {target}")
-    print("Metti i tuoi file in assets/ e lancia:")
-    print(f"  python -m vedit render {target} --preview")
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vedit",
@@ -332,23 +272,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_render.add_argument("--check", action="store_true",
                           help="valida il progetto e stampa il riepilogo della timeline, "
                                "senza costruire ne' esportare nulla")
-    p_render.add_argument("--use-proxy", action="store_true",
-                          help="monta sui proxy invece che sui sorgenti originali "
-                               "(generali prima con `vedit proxy`)")
     p_render.set_defaults(func=cmd_render)
 
     p_probe = sub.add_parser("probe", help="mostra i metadati di un file")
     p_probe.add_argument("path")
     p_probe.add_argument("--json", action="store_true")
     p_probe.set_defaults(func=cmd_probe)
-
-    p_proxy = sub.add_parser("proxy", help="genera copie leggere dei sorgenti su cui montare")
-    p_proxy.add_argument("project", help="percorso del timeline.yaml")
-    p_proxy.add_argument("--height", type=int, default=480,
-                         help="altezza dei proxy in pixel (default: 480)")
-    p_proxy.add_argument("--force", action="store_true",
-                         help="rigenera anche i proxy gia' presenti")
-    p_proxy.set_defaults(func=cmd_proxy)
 
     p_beats = sub.add_parser("beats", help="trova il tempo e i battiti di una traccia audio")
     p_beats.add_argument("path", help="file audio o video da analizzare")
@@ -441,11 +370,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_fonts = sub.add_parser("fonts", help="elenca i font utilizzabili per testo e sottotitoli")
     p_fonts.set_defaults(func=cmd_fonts)
-
-    p_init = sub.add_parser("init", help="crea un nuovo progetto da template")
-    p_init.add_argument("directory")
-    p_init.add_argument("--force", action="store_true")
-    p_init.set_defaults(func=cmd_init)
 
     return parser
 

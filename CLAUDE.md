@@ -68,12 +68,9 @@ Senza MoviePy:
   che `Project.from_dict` sa leggere.
 - **`vedit/extract.py`** — orchestrazione dell'estrazione: chiama `beats` e `scenes`,
   allinea i tagli al battito, scrive il `template.yaml`.
-- **`vedit/subtitles.py`** — parsing dei `.srt`. Solo manipolazione di testo.
-- **`vedit/proxies.py`** — copie leggere dei sorgenti, con cache basata sull'impronta
-  del file. Chiama ffmpeg, non MoviePy.
 - **`vedit/fonts.py`** — ricerca dei font e a capo del testo (usa Pillow, non MoviePy).
 - **`vedit/report.py`** — il riepilogo di `render --check`. Legge i metadati con ffprobe.
-- **`vedit/ffmpeg_tools.py`** — subprocess verso ffmpeg/ffprobe. Nessun MoviePy.
+- **`vedit/ffmpeg_tools.py`** — subprocess verso ffprobe. Nessun MoviePy.
 
 Con MoviePy:
 
@@ -81,7 +78,7 @@ Con MoviePy:
 - **`vedit/progress.py`** — barra di avanzamento (usa proglog, che arriva con MoviePy).
 
 - **`vedit/cli.py`** — argparse. Importa MoviePy **pigramente** dentro le funzioni
-  comando, perché l'import è lento e `probe`/`init`/`--check` non ne hanno bisogno.
+  comando, perché l'import è lento e `probe`/`extract`/`--check` non ne hanno bisogno.
 
 Ogni nuova funzionalità dichiarativa richiede tre modifiche coordinate:
 1. il campo in `models.py` con la sua validazione
@@ -145,9 +142,8 @@ media nel repo.
 
 Prima di dichiarare completo un lavoro:
 1. `pytest -q` verde
-2. `python -m vedit render projects/demo/timeline.yaml --dry-run` senza errori
-3. per modifiche al rendering, un render `--preview` reale e la verifica del risultato
-4. per modifiche ai template, il giro completo su un video sintetico:
+2. per modifiche al rendering, un render `--preview` reale e la verifica del risultato
+3. per modifiche ai template, il giro completo su un video sintetico:
    `extract` → `apply --check` → `apply` → verifica che i tagli del video prodotto
    cadano sugli `at` del template (vedi sotto)
 

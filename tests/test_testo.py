@@ -207,7 +207,6 @@ def test_l_anteprima_riscala_anche_posizioni_e_testo():
             "stroke_color": "black", "stroke_width": 4, "max_width": 600,
             "position": ["center", 820],
         }],
-        "subtitles": {"src": "d.srt", "margin_bottom": 70, "font_size": 48},
     })
     p.scale(0.5)
 
@@ -216,8 +215,6 @@ def test_l_anteprima_riscala_anche_posizioni_e_testo():
     style = p.overlays[0].style
     assert (style.font_size, style.padding, style.stroke_width) == (36, 9, 2)
     assert style.max_width == 300           # era in pixel: si dimezza
-    assert p.subtitles.margin_bottom == 35
-    assert p.subtitles.style.font_size == 24
 
 
 def test_le_misure_in_frazione_non_si_riscalano():
@@ -238,14 +235,3 @@ def test_le_dimensioni_dell_anteprima_restano_pari():
     })
     p.scale(0.5)
     assert p.output.size == (960, 538)
-
-
-def test_i_sottotitoli_hanno_uno_stile_leggibile_di_partenza():
-    p = Project.from_dict({
-        "timeline": [{"type": "color", "duration": 1}],
-        "subtitles": {"src": "d.srt"},
-    })
-    style = p.subtitles.style
-    assert style.color == "white" and style.stroke_color == "black"
-    assert style.stroke_width == 2 and style.max_width == 0.8
-    assert p.subtitles.margin_bottom == 60

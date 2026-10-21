@@ -341,12 +341,12 @@ class Segment:
 @dataclass
 class TextStyle:
     """
-    Aspetto di un testo su video, condiviso da overlay e sottotitoli.
+    Aspetto di un testo su video.
 
-    I due mestieri sono lo stesso mestiere: rendere leggibile del testo sopra
-    un'immagine che non controlli. Le tre difese, in ordine di efficacia, sono
-    il contorno (`stroke`), lo sfondo semitrasparente (`bg_color` + `bg_opacity`)
-    e infine il corpo grande.
+    Il mestiere e' uno solo: rendere leggibile del testo sopra un'immagine che
+    non controlli. Le tre difese, in ordine di efficacia, sono il contorno
+    (`stroke`), lo sfondo semitrasparente (`bg_color` + `bg_opacity`) e infine
+    il corpo grande.
     """
 
     font: str | None = None        # percorso a un .ttf/.otf o nome di font installato
@@ -436,8 +436,7 @@ class Overlay:
             ov.src = Path(_require(data, "src", where))
         else:
             ov.text = str(_require(data, "text", where))
-            # 64px e' un corpo da cartello a tutto schermo; i sottotitoli, che
-            # devono farsi dimenticare, partono piu' piccoli.
+            # 64px e' un corpo da cartello a tutto schermo su un canvas 1080p.
             ov.style = TextStyle.from_dict(data, where, font_size=64)
 
         for key in ("start", "duration", "fade", "opacity"):
@@ -451,40 +450,6 @@ class Overlay:
             ov.position = tuple(pos) if isinstance(pos, list) else pos
 
         return ov
-
-
-@dataclass
-class SubtitlesSpec:
-    """
-    Sottotitoli caricati da un file .srt e disegnati sopra tutto il montaggio.
-
-    A differenza degli overlay non si dichiarano uno per uno: tempi e testo
-    stanno nell'srt, qui si decide solo come appaiono e dove.
-    """
-
-    src: Path
-    style: TextStyle = field(default_factory=TextStyle)
-    margin_bottom: int = 60        # distanza dal bordo inferiore, in pixel
-    offset: float = 0.0            # sposta tutti i tempi: per rimettere in sync un srt
-
-    @classmethod
-    def from_dict(cls, data: dict | None) -> SubtitlesSpec | None:
-        if not data:
-            return None
-        where = "subtitles"
-        spec = cls(src=Path(_require(data, "src", where)))
-        # Valori di partenza pensati per essere leggibili su qualsiasi immagine:
-        # bianco con contorno nero, larghi al massimo l'80% del canvas.
-        spec.style = TextStyle.from_dict(
-            data, where,
-            font_size=48, color="white", stroke_color="black", stroke_width=2,
-            max_width=0.8, align="center", padding=8,
-        )
-        if data.get("margin_bottom") is not None:
-            spec.margin_bottom = int(data["margin_bottom"])
-        if data.get("offset") is not None:
-            spec.offset = float(data["offset"])
-        return spec
 
 
 @dataclass
@@ -519,7 +484,6 @@ class Project:
     timeline: list[Segment] = field(default_factory=list)
     overlays: list[Overlay] = field(default_factory=list)
     audio: AudioSpec | None = None
-    subtitles: SubtitlesSpec | None = None
     root: Path = Path(".")   # i percorsi relativi si risolvono da qui
 
     @classmethod
@@ -555,7 +519,6 @@ class Project:
             for i, o in enumerate(data.get("overlays") or [])
         ]
         audio = _collect(errors, AudioSpec.from_dict, data.get("audio"))
-        subtitles = _collect(errors, SubtitlesSpec.from_dict, data.get("subtitles"))
 
         _raise_all(errors, "Il progetto contiene errori")
 
@@ -565,7 +528,6 @@ class Project:
             timeline=[s for s in segments if s is not None],
             overlays=[o for o in overlays if o is not None],
             audio=audio,
-            subtitles=subtitles,
         )
 
     def resolve(self, path: Path | str) -> Path:
@@ -686,10 +648,6 @@ class Project:
                 ov.height = px(ov.height)
             _scale_style(ov.style, factor)
 
-        if self.subtitles is not None:
-            _scale_style(self.subtitles.style, factor)
-            self.subtitles.margin_bottom = px(self.subtitles.margin_bottom)
-
     # ----------------------------------------------------------------------
     # Verifica dei file referenziati
     # ----------------------------------------------------------------------
@@ -713,12 +671,6 @@ class Project:
 
         if self.audio is not None:
             refs.append(("audio", self.resolve(self.audio.src)))
-
-        if self.subtitles is not None:
-            refs.append(("subtitles", self.resolve(self.subtitles.src)))
-            font = self.subtitles.style.font
-            if font and _looks_like_font_file(font):
-                refs.append(("subtitles (font)", self.resolve(font)))
 
         return refs
 

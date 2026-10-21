@@ -1,9 +1,9 @@
 """
 Wrapper sottili attorno a ffmpeg/ffprobe.
 
-Quando serve solo tagliare, concatenare o rimpicciolire, chiamare ffmpeg
-direttamente e' 10-50x piu' veloce di MoviePy, perche' non passa i frame
-attraverso Python/numpy. MoviePy serve quando si deve COMPORRE.
+Leggere i metadati di un file o estrarne dei fotogrammi chiamando ffmpeg
+direttamente costa millisecondi, perche' non passa niente attraverso
+Python/numpy. MoviePy serve quando si deve COMPORRE.
 """
 
 from __future__ import annotations
@@ -78,71 +78,3 @@ def probe(path: str | Path) -> dict:
         "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
         "has_audio": audio_stream is not None,
     }
-
-
-def fast_cut(src: str | Path, dst: str | Path, start: float, end: float) -> Path:
-    """
-    Taglio senza ricompressione: istantaneo e senza perdita di qualita',
-    ma il punto di taglio si allinea al keyframe piu' vicino (puo' scostarsi
-    di qualche decimo di secondo). Per il fotogramma esatto usa accurate_cut().
-    """
-    ensure_ffmpeg()
-    dst = Path(dst)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    _run([
-        "ffmpeg", "-y",
-        "-ss", str(start), "-to", str(end),
-        "-i", str(src),
-        "-c", "copy",
-        str(dst),
-    ])
-    return dst
-
-
-def accurate_cut(src: str | Path, dst: str | Path, start: float, end: float, crf: int = 18) -> Path:
-    """Taglio al fotogramma esatto, con ricompressione."""
-    ensure_ffmpeg()
-    dst = Path(dst)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    _run([
-        "ffmpeg", "-y",
-        "-i", str(src),
-        "-ss", str(start), "-to", str(end),
-        "-c:v", "libx264", "-crf", str(crf), "-preset", "medium",
-        "-c:a", "aac",
-        str(dst),
-    ])
-    return dst
-
-
-def make_proxy(src: str | Path, dst: str | Path, height: int = 480) -> Path:
-    """
-    Crea una versione leggera del sorgente, da usare durante il montaggio.
-    Si lavora sul proxy (veloce) e si rifa' l'export finale sull'originale.
-    """
-    ensure_ffmpeg()
-    dst = Path(dst)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    _run([
-        "ffmpeg", "-y",
-        "-i", str(src),
-        "-vf", f"scale=-2:{height}",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
-        "-c:a", "aac", "-b:a", "128k",
-        str(dst),
-    ])
-    return dst
-
-
-def extract_frame(src: str | Path, dst: str | Path, at: float) -> Path:
-    """Estrae un singolo fotogramma come immagine: utile per individuare i punti di taglio."""
-    ensure_ffmpeg()
-    dst = Path(dst)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    _run([
-        "ffmpeg", "-y",
-        "-ss", str(at), "-i", str(src),
-        "-frames:v", "1", "-q:v", "2",
-        str(dst),
-    ])
-    return dst

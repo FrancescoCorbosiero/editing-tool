@@ -20,7 +20,7 @@ timeline:
 ```
 
 ```bash
-python -m vedit render projects/demo/timeline.yaml
+python -m vedit render timeline.yaml
 ```
 
 **2. Riusare un montaggio che funziona.** Da un video che ti piace si estrae un
@@ -68,15 +68,14 @@ dipendenze, ma non ti dà il comando `vedit`.
 **3. Prova**:
 
 ```bash
-vedit render projects/demo/timeline.yaml --dry-run
+vedit templates
 ```
 
 Dopo `pip install -e .` il comando si chiama **`vedit`**. Se preferisci non
 installare niente, `python -m vedit ...` funziona lo stesso da dentro questa
 cartella: in questo README i due sono intercambiabili.
 
-Il `--dry-run` costruisce la timeline e valida il file senza esportare nulla: è il modo
-più rapido per scoprire un errore di configurazione.
+Elenca i template presenti in `templates/`: se risponde, l'installazione funziona.
 
 ---
 
@@ -86,7 +85,7 @@ più rapido per scoprire un errore di configurazione.
 # Metadati di un file (durata, risoluzione, fps, codec)
 python -m vedit probe assets/riprese.mp4
 
-# Font utilizzabili per testo e sottotitoli su questa macchina
+# Font utilizzabili per il testo su questa macchina
 python -m vedit fonts
 
 # Tempo e battiti di una traccia, per montare a tempo di musica
@@ -105,27 +104,20 @@ python -m vedit templates
 python -m vedit apply templates/riferimento foto1.jpg riprese.mp4 --preview
 
 # Riepilogo della timeline: cosa cade dove, e cosa non torna
-python -m vedit render projects/demo/timeline.yaml --check
+python -m vedit render timeline.yaml --check
 
-# Anteprima veloce: metà risoluzione, encoding ultrafast → output/demo_preview.mp4
-python -m vedit render projects/demo/timeline.yaml --preview
-
-# Copie leggere dei sorgenti, per montare su 4K senza aspettare
-python -m vedit proxy projects/demo/timeline.yaml
-python -m vedit render projects/demo/timeline.yaml --preview --use-proxy
+# Anteprima veloce: metà risoluzione, encoding ultrafast
+python -m vedit render timeline.yaml --preview
 
 # Export finale
-python -m vedit render projects/demo/timeline.yaml
-
-# Nuovo progetto da template
-python -m vedit init projects/mio-video
+python -m vedit render timeline.yaml
 ```
 
 **Lavora sempre con `--preview` mentre monti.** L'export a piena risoluzione può
 richiedere minuti; l'anteprima secondi. Togli il flag solo quando il montaggio ti convince.
 
 L'anteprima riscala **tutto** il progetto, non solo il canvas: posizioni degli
-overlay, corpo del testo, margini dei sottotitoli. Quello che vedi a metà
+overlay, corpo del testo, contorni. Quello che vedi a metà
 risoluzione è quello che otterrai a piena risoluzione, in miniatura.
 
 ---
@@ -314,8 +306,8 @@ lavorare, pubblicare è un altro discorso.
 esportare niente. Non importa nemmeno MoviePy: risponde in un decimo di secondo.
 
 ```
-$ python -m vedit render projects/demo/timeline.yaml --check
-Progetto : projects/demo/timeline.yaml
+$ python -m vedit render timeline.yaml --check
+Progetto : timeline.yaml
 Canvas   : 1920x1080 @ 30 fps
 Output   : /…/output/demo.mp4
 
@@ -364,19 +356,14 @@ vedit/
   scenes.py        Dove stacca un video: i tagli, per istogrammi (ffmpeg + numpy).
   templates.py     Template audio: slot, lettura del YAML, applicazione ai media.
   extract.py       Da un video di riferimento a un template: mette d'accordo battiti e tagli.
-  subtitles.py     Lettura dei file .srt. Solo testo, nessuna dipendenza.
   fonts.py         Trova un font utilizzabile e manda a capo il testo.
-  proxies.py       Copie leggere dei sorgenti, con cache per impronta del file.
   report.py        Il riepilogo di --check. Legge i metadati con ffprobe.
   builder.py       Traduce il progetto in clip MoviePy. È qui che vive la logica di montaggio.
   progress.py      La barra di avanzamento dell'export.
-  ffmpeg_tools.py  Chiamate dirette a ffmpeg/ffprobe per le operazioni veloci.
+  ffmpeg_tools.py  Chiamate dirette a ffprobe per i metadati.
   cli.py           Interfaccia da riga di comando.
 templates/         I template audio: un template.yaml e la sua traccia, per cartella.
-projects/demo/     Progetto di esempio, documentato campo per campo.
-examples/          Script didattici progressivi (leggili in ordine).
 docs/GLOSSARIO.md  I termini di montaggio, spiegati per programmatori.
-assets/            I tuoi file sorgente. Ignorato da git.
 output/            I render. Ignorato da git.
 tests/             Test rapidi che non richiedono file video.
 ```
@@ -436,7 +423,7 @@ deve rispondere subito.
 | `position` | tutti | `[x, y]` in pixel, oppure `"center"` / `["center", "top"]` |
 | `fade`, `opacity` | tutti | dissolvenza in entrata/uscita e trasparenza |
 
-I campi di **stile del testo** valgono sia qui sia nei sottotitoli:
+I campi di **stile del testo**:
 
 | Campo | Default (overlay) | Note |
 |---|---|---|
@@ -448,15 +435,6 @@ I campi di **stile del testo** valgono sia qui sia nei sottotitoli:
 | `max_width` | nessuno | `≤ 1` = frazione del canvas, `> 1` = pixel. Attiva l'a capo automatico |
 | `align` | `center` | `left` \| `center` \| `right` |
 | `padding` | `0` | spazio fra testo e bordo del riquadro |
-
-### `subtitles` — un file `.srt` sopra tutto il montaggio
-
-| Campo | Default | Note |
-|---|---|---|
-| `src` | — | percorso del `.srt` |
-| `margin_bottom` | `60` | distanza dal bordo inferiore, in pixel |
-| `offset` | `0` | sposta **tutti** i tempi: per rimettere in sincrono un srt sfasato |
-| stile | `font_size: 48`, bianco con contorno nero, `max_width: 0.8`, `padding: 8` | vedi la tabella sopra |
 
 ### `audio` — traccia aggiuntiva
 
@@ -647,7 +625,7 @@ Le regole del contratto:
 
 ---
 
-## Testo e sottotitoli
+## Testo
 
 ### Il font: il problema numero uno
 
@@ -698,39 +676,6 @@ overlays:
 `max_width` attiva **l'a capo automatico alle parole**. Il riquadro di sfondo
 resta largo quanto la riga più lunga: un testo corto non si porta dietro un
 rettangolo mezzo vuoto.
-
-### Sottotitoli da file `.srt`
-
-```yaml
-subtitles:
-  src: ../../assets/dialoghi.srt
-  font_size: 42
-  stroke_color: black
-  stroke_width: 2
-  max_width: 0.8            # 80% del canvas
-  margin_bottom: 70         # distanza dal bordo inferiore
-  offset: -0.5              # tutto mezzo secondo prima: sistema un srt sfasato
-```
-
-Un `.srt` è testo semplice, a blocchi separati da una riga vuota:
-
-```
-1
-00:00:01,000 --> 00:00:04,200
-Prima battuta,
-anche su due righe
-```
-
-Il numero progressivo serve solo agli umani, `vedit` lo ignora. Vengono accettati
-i ritorni a capo di Windows, il BOM del Blocco Note, il punto al posto della
-virgola nei millisecondi e i file salvati in latin-1. Ogni battuta diventa un clip
-di testo indipendente, posizionato **dal basso**: un sottotitolo su due righe è
-più alto, e ancorandolo in alto la seconda riga finirebbe fuori dal quadro.
-
-`--check` conta le battute e avvisa su quelle che si sovrappongono nel tempo, che
-durano meno di mezzo secondo (illeggibili) o che iniziano dopo la fine del montaggio.
-
----
 
 ## Movimento sulle immagini (effetto Ken Burns)
 
@@ -813,88 +758,6 @@ quasi certamente è questo.
 
 ---
 
-## Montare su 4K: i proxy
-
-Montare direttamente su file 4K è insopportabile: ogni fotogramma va decodificato,
-ridimensionato e ricomposto, e quel lavoro viene buttato via al tentativo successivo.
-La soluzione standard nei software di montaggio si chiama **proxy**: si genera una
-volta una copia a bassa risoluzione di ogni sorgente, si monta su quella, e l'export
-finale torna agli originali. Il montaggio non cambia — tagli, transizioni e durate
-lavorano sul *tempo*, non sui pixel — cambia solo quanto aspetti.
-
-```bash
-# una volta sola: crea proxies/ accanto al file di progetto
-python -m vedit proxy projects/demo/timeline.yaml
-
-# mentre monti: veloce
-python -m vedit render projects/demo/timeline.yaml --preview --use-proxy
-
-# export finale: sempre dagli originali
-python -m vedit render projects/demo/timeline.yaml
-```
-
-Misurato su un sorgente 3840×2160, montaggio di 10s verso 1080p:
-
-| operazione | tempo |
-|---|---|
-| anteprima dai sorgenti 4K | 51s |
-| generazione dei proxy (una volta sola) | 2.5s |
-| anteprima dai proxy | **9.6s** |
-
-**5× più veloce**, e la generazione si ripaga alla prima anteprima. Su riprese
-reali la generazione è più lenta (il sorgente sintetico di questa misura è
-pochissimi MB), ma il guadagno per anteprima è lo stesso.
-
-### La cache
-
-Il nome del proxy contiene un'impronta del contenuto del sorgente:
-
-```
-proxies/riprese-480p-35e057a4c37b.mp4
-```
-
-Se il file originale cambia, cambia l'impronta, il proxy vecchio non viene più
-trovato e ne nasce uno nuovo. Non esiste un controllo «è aggiornato?» da
-sbagliare, e non c'è modo di montare per errore su un proxy che non corrisponde
-più al suo originale. L'impronta si calcola su dimensione, primo e ultimo MiB:
-leggere per intero un file da 20 GB costerebbe, a ogni controllo, il tempo che
-i proxy servono a risparmiare.
-
-`--height` genera proxy a un'altezza diversa (convivono con quelli già fatti),
-`--force` li rigenera. Un sorgente già più piccolo dell'altezza richiesta viene
-saltato: non ha senso rimpicciolire ciò che è già piccolo.
-
-### Le due protezioni
-
-- **`--use-proxy` senza `--preview`** aggiunge `_proxy` al nome del file: un
-  export a piena risoluzione fatto sui proxy è indistinguibile da quello buono
-  finché non lo guardi, e non deve poterlo sovrascrivere.
-- **Proxy mancante** non è un errore: `vedit` avvisa e monta quel segmento
-  sull'originale. Chi ha appena aggiunto una ripresa non deve vedere un render
-  che fallisce.
-
----
-
-## Quando usare FFmpeg direttamente
-
-MoviePy passa ogni fotogramma attraverso Python e numpy: è comodo per comporre,
-ma lento. Per tagliare, concatenare o ridimensionare senza effetti, `ffmpeg_tools.py`
-espone wrapper che sono 10–50× più veloci:
-
-```python
-from vedit.ffmpeg_tools import fast_cut, make_proxy, probe
-
-probe("assets/riprese.mp4")                          # metadati
-fast_cut("in.mp4", "out.mp4", 10, 25)                # taglio senza ricompressione
-make_proxy("in.mp4", "proxies/in.mp4", height=480)   # versione leggera per montare
-```
-
-`fast_cut` non ricomprime: è istantaneo e senza perdita, ma il taglio si allinea al
-keyframe più vicino (scarto fino a qualche decimo di secondo). Per il fotogramma
-esatto usa `accurate_cut`.
-
----
-
 ## Test e qualità
 
 ```bash
@@ -903,10 +766,10 @@ ruff check .       # il lint
 ```
 
 I test coprono parsing, validazione, matematica delle transizioni, movimento,
-sottotitoli e stile del testo usando segmenti `color` e immagini generate in
-memoria: **nessun file video nel repo**. I pochi test che hanno bisogno di un
-sorgente vero (i proxy) se lo generano con ffmpeg in una cartella temporanea, e
-si saltano da soli se ffmpeg non c'è.
+template e stile del testo usando segmenti `color` e immagini generate in
+memoria: **nessun file video nel repo**. I test che hanno bisogno di un sorgente
+vero (battiti, tagli, estrazione) se lo generano con ffmpeg in una cartella
+temporanea, e si saltano da soli se ffmpeg non c'è.
 
 Un test merita una nota: `tests/test_confini.py` importa i moduli "leggeri" in un
 interprete separato e verifica che **non** si siano tirati dietro MoviePy. È il
@@ -923,19 +786,6 @@ lancia lint e test su Python 3.10 e 3.12, genera il materiale di prova con ffmpe
 e renderizza davvero il progetto demo, controllando durata, dimensioni e che i
 fotogrammi non siano neri. Un export può uscire con codice 0 e produrre un video
 sbagliato: la CI lo verifica come lo verificheresti tu.
-
----
-
-## Percorso di apprendimento
-
-Leggi gli script in `examples/` in ordine, lanciandoli:
-
-1. `01_taglio_e_concatenazione.py` — tagliare e attaccare
-2. `02_transizioni.py` — perché serve la sovrapposizione
-3. `03_immagini_e_overlay.py` — livelli e posizionamento
-4. `04_usa_il_toolkit.py` — generare timeline da codice
-
-Poi apri `builder.py`: a quel punto lo leggerai senza fatica.
 
 ---
 

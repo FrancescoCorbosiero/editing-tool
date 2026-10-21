@@ -31,11 +31,9 @@ from moviepy import (
 
 from . import motion, transitions
 from .fonts import find_font, font_error_message, wrap_text
-from .models import AudioSpec, ConfigError, Overlay, Project, Segment, SubtitlesSpec, TextStyle
+from .models import AudioSpec, ConfigError, Overlay, Project, Segment, TextStyle
 from .motion import MotionContext
 from .progress import RenderProgress, format_duration
-from .proxies import find_proxy
-from .subtitles import load_srt
 from .timeline import (
     clamp_overlap,
     effective_overlaps,
@@ -111,28 +109,7 @@ def place_on_canvas(clip, size: tuple[int, int], background: tuple[int, int, int
 # Costruzione dei singoli segmenti
 # --------------------------------------------------------------------------
 
-def source_path(seg: Segment, project: Project, use_proxy: bool) -> Path:
-    """
-    Il file da aprire per questo segmento: l'originale o il suo proxy.
-
-    Il proxy si usa solo se e' stato chiesto E se esiste: chi ha appena
-    aggiunto una ripresa non deve vedere il render fallire, deve vedere un
-    avviso e il montaggio che va avanti sull'originale.
-    """
-    original = project.resolve(seg.src)
-    if not use_proxy:
-        return original
-
-    proxy = find_proxy(project, original)
-    if proxy is None:
-        log.warning("Nessun proxy per %s: uso l'originale (lancia `vedit proxy`).",
-                    original.name)
-        return original
-    return proxy
-
-
-def build_segment(seg: Segment, project: Project, use_proxy: bool = False,
-                  target: float | None = None):
+def build_segment(seg: Segment, project: Project, target: float | None = None):
     """
     Trasforma un Segment del YAML in un clip MoviePy pronto per il montaggio.
 
@@ -144,7 +121,7 @@ def build_segment(seg: Segment, project: Project, use_proxy: bool = False,
     fit_mode = seg.fit or project.defaults.fit
 
     if seg.type == "video":
-        path = source_path(seg, project, use_proxy)
+        path = project.resolve(seg.src)
         if not path.exists():
             raise FileNotFoundError(f"Sorgente video non trovata: {path}")
         clip = VideoFileClip(str(path))
@@ -287,8 +264,6 @@ def make_text_clip(text: str, style: TextStyle, canvas_width: int, duration: flo
     """
     Costruisce un clip di testo: font, contorno, sfondo, a capo, allineamento.
 
-    Usato sia dagli overlay sia dai sottotitoli - sono lo stesso problema.
-
     Sul metodo: si usa sempre `label`, che disegna il testo cosi' com'e' e
     produce un'immagine grande esattamente quanto serve. L'andata a capo la
     calcoliamo noi (fonts.wrap_text) invece di usare il `caption` di MoviePy,
@@ -356,49 +331,6 @@ def build_overlay(ov: Overlay, project: Project, video_duration: float):
 
 
 # --------------------------------------------------------------------------
-# Sottotitoli
-# --------------------------------------------------------------------------
-
-def build_subtitles(spec: SubtitlesSpec, project: Project, video_duration: float) -> list:
-    """
-    Trasforma un file .srt in una lista di clip di testo gia' posizionati.
-
-    Ogni battuta diventa un clip a se', con il suo inizio e la sua durata: e'
-    piu' semplice e piu' prevedibile di un unico clip che cambia contenuto, e
-    permette di gestire le battute che sforano la fine del video.
-
-    La posizione verticale si calcola da sotto (`margin_bottom`) e non da sopra,
-    perche' un sottotitolo su due righe e' piu' alto di uno su una riga: se
-    ancorassimo l'angolo in alto, la seconda riga finirebbe fuori dal quadro.
-    """
-    path = project.resolve(spec.src)
-    cues = load_srt(path)
-    if not cues:
-        log.warning("Il file %s non contiene sottotitoli.", path.name)
-        return []
-
-    canvas_w, canvas_h = project.output.size
-    clips = []
-    ignorati = 0
-
-    for cue in cues:
-        start = cue.start + spec.offset
-        end = min(cue.end + spec.offset, video_duration)
-        if start >= video_duration or end <= start:
-            ignorati += 1
-            continue
-
-        clip = make_text_clip(cue.text, spec.style, canvas_w, end - start,
-                              root=project.root)
-        y = max(0, canvas_h - spec.margin_bottom - clip.h)
-        clips.append(clip.with_start(start).with_position(("center", y)))
-
-    log.info("Sottotitoli: %d battute da %s%s", len(clips), path.name,
-             f" ({ignorati} fuori dalla durata del video)" if ignorati else "")
-    return clips
-
-
-# --------------------------------------------------------------------------
 # Audio
 # --------------------------------------------------------------------------
 
@@ -443,7 +375,7 @@ def build_audio(spec: AudioSpec, project: Project, video_duration: float):
 # Entry point
 # --------------------------------------------------------------------------
 
-def build(project: Project, use_proxy: bool = False):
+def build(project: Project):
     """Costruisce il clip finale, pronto per write_videofile()."""
     size = project.output.size
 
@@ -478,21 +410,19 @@ def build(project: Project, use_proxy: bool = False):
     log.info("Costruzione di %d segmenti...", len(project.timeline))
     clips = []
     for i, seg in enumerate(project.timeline):
-        clips.append(build_segment(seg, project, use_proxy, target=targets[i]))
+        clips.append(build_segment(seg, project, target=targets[i]))
         log.info("  [%d] %s %s (%.2fs)", i, seg.type, seg.label or seg.src or "",
                  clips[-1].duration)
 
     video = concat_with_transitions(clips, requests, size, placements=placements)
     log.info("Durata del montaggio: %.2fs", video.duration)
 
-    # Overlay e sottotitoli vanno sopra il montaggio, in questo ordine: un logo
-    # deve restare visibile anche quando parla qualcuno.
+    # Gli overlay vanno sopra il montaggio, nell'ordine in cui sono scritti: il
+    # primo della lista finisce sotto, l'ultimo sopra a tutti.
     layers = []
     if project.overlays:
         log.info("Applicazione di %d overlay...", len(project.overlays))
         layers += [build_overlay(ov, project, video.duration) for ov in project.overlays]
-    if project.subtitles is not None:
-        layers += build_subtitles(project.subtitles, project, video.duration)
 
     if layers:
         video = CompositeVideoClip([video, *layers], size=size).with_duration(video.duration)
@@ -530,8 +460,7 @@ def discard_partial(target: Path) -> list[Path]:
     return removed
 
 
-def render(project: Project, dry_run: bool = False, preview: bool = False,
-           use_proxy: bool = False) -> Path | None:
+def render(project: Project, dry_run: bool = False, preview: bool = False) -> Path | None:
     """Costruisce ed esporta il video. Restituisce il percorso del file prodotto."""
     out = project.output
 
@@ -545,14 +474,8 @@ def render(project: Project, dry_run: bool = False, preview: bool = False,
         out.preset = "ultrafast"
         out.crf = 30
         out.path = out.path.with_name(out.path.stem + "_preview" + out.path.suffix)
-    elif use_proxy:
-        # Un export a piena risoluzione fatto sui proxy sarebbe indistinguibile
-        # da quello buono, finche' non lo si guarda: gli si cambia nome, cosi'
-        # il file finale non viene mai sovrascritto da una versione a 480p.
-        log.warning("Export dai proxy: qualita' ridotta, non e' il file definitivo.")
-        out.path = out.path.with_name(out.path.stem + "_proxy" + out.path.suffix)
 
-    video = build(project, use_proxy=use_proxy)
+    video = build(project)
 
     if dry_run:
         log.info("dry-run: nessun file scritto. Durata finale %.2fs", video.duration)

@@ -227,11 +227,6 @@ cambia tutto. È la differenza fra riconoscere uno stacco e riconoscere un movim
 
 ## Flusso di lavoro
 
-**Proxy** — una copia a bassa risoluzione dei sorgenti, su cui montare per non
-aspettare. Si genera una volta e si butta quando serve: l'export finale torna sempre
-agli originali. È una cache, con gli stessi problemi di invalidazione di ogni cache —
-`vedit` li risolve mettendo l'impronta del sorgente nel nome del proxy.
-
 **Anteprima** (*preview*) — un export veloce e brutto, fatto per guardare il
 montaggio, non la qualità. Se non lavori in anteprima, passerai la giornata ad
 aspettare.
@@ -239,13 +234,3 @@ aspettare.
 **Upscaling** — ingrandire materiale più piccolo del canvas. I pixel mancanti vengono
 inventati per interpolazione: il risultato è più morbido, mai più nitido. `--check`
 avvisa quando sta per succedere.
-
-**Sottotitoli / SRT** — testo sincronizzato, in un formato che è testo semplice a
-blocchi (tempo di inizio, tempo di fine, righe). "Sottotitoli" in senso stretto sono
-la traduzione dei dialoghi; i *closed caption* includono anche i suoni ("[bussano
-alla porta]") e servono all'accessibilità.
-
-**Sync** — l'allineamento fra audio e video, o fra sottotitoli e parlato. Un file
-`.srt` scaricato da un'altra edizione dello stesso video è quasi sempre sfasato di
-qualche secondo: si sistema spostando *tutti* i tempi della stessa quantità
-(`subtitles.offset`).

@@ -48,8 +48,8 @@ def test_formattazione_del_tempo():
 
 
 def test_il_testo_del_riepilogo_contiene_le_informazioni_chiave():
-    testo = format_report(analyze(progetto(), "projects/demo/timeline.yaml"))
-    assert "projects/demo/timeline.yaml" in testo
+    testo = format_report(analyze(progetto(), "edits/prova/timeline.yaml"))
+    assert "edits/prova/timeline.yaml" in testo
     assert "640x360 @ 25 fps" in testo
     assert "Durata totale" in testo
     assert "uno" in testo and "due" in testo

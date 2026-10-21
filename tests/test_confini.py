@@ -1,7 +1,7 @@
 """
 Il confine architetturale: i moduli "leggeri" non devono tirarsi dietro MoviePy.
 
-Non e' pignoleria. `probe`, `init` e `render --check` devono rispondere subito,
+Non e' pignoleria. `probe`, `extract` e `render --check` devono rispondere subito,
 e i test di validazione girano in millisecondi solo finche' nessuno aggiunge un
 `from moviepy import ...` in cima al modulo sbagliato. Questo test lo impedisce.
 """
@@ -14,7 +14,7 @@ RADICE = Path(__file__).resolve().parent.parent   # la cartella che contiene ved
 
 MODULI_LEGGERI = ["vedit.models", "vedit.timeline", "vedit.transitions",
                   "vedit.report", "vedit.ffmpeg_tools", "vedit.beats",
-                  "vedit.subtitles", "vedit.fonts", "vedit.proxies", "vedit.motion",
+                  "vedit.fonts", "vedit.motion",
                   "vedit.scenes", "vedit.templates", "vedit.extract"]
 
 
