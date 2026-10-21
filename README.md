@@ -57,15 +57,22 @@ al posto tuo. Il repo ha due skill che descrivono la procedura passo per passo:
 |---|---|---|
 | carichi un video e chiedi di **templetizzarlo** | ne estrae musica, tagli e stile, lo verifica e lo salva in `templates/` | `templetizza` |
 | mandi immagini, video, GIF e i **testi** che vuoi | crea l'edit, mette i media nei posti, i testi dove dici, controlla i provini e ti manda il video | `monta` |
+| senti che **manca un battito** (o che ce n'è uno di troppo) | aggiunge, divide o toglie i tagli del template e ti manda i posti numerati sulla musica, da riascoltare | `templetizza` |
 
 Per cambiare qualcosa basta dirlo ("metti il video al posto 5", "il titolo più in
 alto", "togli l'ultima scritta"): l'edit si corregge e il template resta lo stesso.
+Se invece è il ritmo a non tornare ("al drop mancano dei colpi", "il 4 dividilo in
+due"), si correggono i tagli del template, e la correzione vale per ogni video fatto
+con lui.
 
 ## A mano
 
 ```bash
 vedit extract riferimento.mp4 -o templates/raffica   # un template da un video
 vedit templates                                      # i template che hai
+vedit slots templates/raffica                        # i suoi posti, uno per riga
+vedit slots templates/raffica --video                # i posti numerati sulla musica
+vedit slots templates/raffica --cut 4.45             # un taglio in più, sul battito
 
 vedit new edits/ormone --template templates/raffica  # un edit nuovo, commentato posto per posto
 vedit render edits/ormone --check                    # cosa cade dove, senza renderizzare
@@ -90,7 +97,7 @@ per riga, con un commento che dice quando entra, quanto dura e cosa c'era lì ne
 di riferimento.
 
 ```yaml
-template: ../../templates/raffica      # 32 posti, 151.5 BPM, 18.13s, 720x1280
+template: ../../templates/raffica      # 33 posti, 151.5 BPM, 18.13s, 720x1280
 
 media:
   - media/01.mp4                 #  1)    0.00s  dura 3.86s  video  [apertura]
@@ -135,7 +142,7 @@ texts:
     duration: 2.5
     position: bottom
   - text: "Funziona davvero?"
-    slot: 25
+    slot: 26
     bg_color: black
     bg_opacity: 0.6
     padding: 16
@@ -230,6 +237,41 @@ Il template **riproduce** il riferimento, non lo abbellisce: una foto finisce in
 movimento solo dove il riferimento scorreva davvero, e mai se le immagini entrano
 intere (il movimento le taglierebbe).
 
+### Correggere i tagli a orecchio: `vedit slots`
+
+Il template riproduce i tagli del riferimento, e il riferimento non è legge: in
+`raffica` il basso entra con quattro colpi da mezzo battito, e il video originale
+cambiava immagine solo sui primi tre. Nessun rilevatore può indovinare che il quarto
+lo vuoi: è gusto. `vedit slots` corregge i tagli con le parole di chi ascolta.
+
+```
+$ vedit slots templates/raffica --cut 4.45
+raffica: 32 posti -> 33
+  (4.45 -> 4.456s, sulla griglia del battito)
+  + taglio a 4.456s: comincia il posto 5
+  i posti dal 5 al 32 ora sono dal 6 al 33
+
+Per tornare indietro: vedit slots templates/raffica --merge 5
+```
+
+| comando | cosa fa |
+|---|---|
+| `vedit slots templates/raffica` | l'elenco dei posti: quando entrano, quanto durano, quanti battiti |
+| `--cut 4.45` | un taglio in più (anche `0:04.45`), rimesso sul mezzo battito più vicino: a orecchio si segna sempre un po' prima o un po' dopo |
+| `--split 4` | il posto 4 diviso in due parti uguali; con `--into 4` in quattro, con `--into 3` una terzina |
+| `--merge 5` | il posto 5 si unisce al 4: via il taglio fra i due |
+| `--grid` | dove allineare i `--cut`: `beat`, `half` (default), `quarter`, oppure `off` |
+| `--video` | i posti numerati sulla musica, in `output/<template>-posti.mp4` |
+
+I numeri sono sempre quelli dell'elenco **di prima** del comando, anche con più
+operazioni insieme. Il video dei posti è il modo di decidere: un cartello colorato con
+il suo numero per ogni posto, sulla traccia del template. Lo guardi, senti dove manca
+un taglio, e sai già come chiamarlo ("il 4 in due"). I decimali si scrivono col punto.
+
+Cambiare i posti cambia i numeri: gli edit costruiti su quel template vanno
+ricontrollati (`vedit slots` dice quali sono), con un media in più per ogni posto
+nuovo e i `slot:` dei testi spostati di conseguenza.
+
 ### Lo schema di `template.yaml`
 
 | campo | | significato |
@@ -251,8 +293,8 @@ intere (il movimento le taglierebbe).
 
 **Uno slot non ha una durata.** Finisce quando comincia il successivo, e l'ultimo con
 la traccia. Il template è un file di testo pensato per essere corretto a mano:
-spostare un `at` sposta *quel* taglio e basta; dare un `label` ai posti che contano
-aiuta a parlarne.
+spostare un `at` sposta *quel* taglio e basta (per aggiungerne o toglierne c'è
+`vedit slots`); dare un `label` ai posti che contano aiuta a parlarne.
 
 ### Limiti, onestamente
 
@@ -280,8 +322,9 @@ $ vedit render edits/ormone --check
   #   entra a   dura   media
   1      0.00   3.86s  apertura.mp4
   2      3.86   0.20s  grafico.png
+  3      4.06   0.20s  studio.png
+  4      4.26   0.20s  onda.gif   (in loop)
  ...
- 14      7.82   0.40s  onda.gif   (in loop)
 
   #  inizio     fine    durata  transizione  tipo   segmento
   0  0:00.00  0:03.86     3.86s  -    video  apertura  apertura.mp4  [0 -> 3.86]  muto  720x1280
@@ -291,7 +334,7 @@ Dissolvenze : al nero negli ultimi 1.97s
 
 Sopra il montaggio (2):
    inizio     fine  dove      cosa
-  0:03.86  0:06.24  top       L'ormone della crescita
+  0:03.86  0:05.84  top       L'ormone della crescita
   0:11.78  0:13.76  center    Funziona davvero?
 
 Avvisi (1):

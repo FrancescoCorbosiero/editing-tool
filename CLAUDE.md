@@ -24,7 +24,9 @@ tu monti il video e glielo consegni. Le due procedure sono le skill del progetto
 - **`.claude/skills/templetizza/`** — da un video caricato a un template in `templates/`;
 - **`.claude/skills/monta/`** — da media e testi a un video finito, con un edit in `edits/`.
 
-Seguile quando l'utente chiede quelle cose, anche se non le nomina.
+Seguile quando l'utente chiede quelle cose, anche se non le nomina. Se l'utente
+sente un battito che manca, o uno di troppo, si correggono i tagli del template con
+`vedit slots` (passo 4 di `templetizza`): il riferimento non è legge, il suo orecchio sì.
 
 Il vincolo che tiene onesto tutto il resto: **template ed edit generano un
 `timeline.yaml`, non sono un secondo motore di montaggio**. Quello che producono deve
@@ -79,6 +81,10 @@ Senza MoviePy:
   riconosce stile e dissolvenze, allinea i tagli al battito, scrive il `template.yaml`.
 - **`vedit/edit.py`** — gli edit: legge l'`edit.yaml`, risolve i tempi dei testi sui
   posti del template, produce il progetto (i media passano da `bind()`).
+- **`vedit/slots.py`** — i posti di un template a orecchio: l'elenco, i tagli aggiunti
+  (`--cut`, allineati alla griglia), divisi (`--split`) o tolti (`--merge`), e i
+  cartelli del video dei posti numerati. Riscrive il template con `extract.render`,
+  l'unico writer del `template.yaml`: un campo nuovo di `Slot` va scritto lì.
 - **`vedit/text.py`** — disegna il testo in un'immagine RGBA con Pillow.
 - **`vedit/fonts.py`** — ricerca dei font e a capo del testo (Pillow).
 - **`vedit/sheet.py`** — il foglio dei provini di un video (ffmpeg + Pillow).
@@ -166,7 +172,8 @@ Prima di dichiarare completo un lavoro:
 1. `pytest -q` verde e `ruff check .` pulito
 2. per modifiche al rendering, un render reale e la verifica del risultato (sotto)
 3. per modifiche ai template o agli edit, il giro completo su materiale sintetico:
-   una tinta per posto su `templates/raffica`, render, e verifica che i tagli cadano
+   una tinta per posto su `templates/raffica` (`vedit slots templates/raffica --video`
+   la fa da solo, col numero del posto sopra), render, e verifica che i tagli cadano
    sugli `at`; poi `vedit sheet ... --slots templates/raffica` e **guarda i provini**
 
 ## Verifica del risultato di un render
@@ -189,14 +196,15 @@ segmenti; se salta di colpo, la sovrapposizione non sta funzionando.
 
 Per un template la verifica è più precisa, perché c'è un valore atteso: **i tagli
 devono cadere sugli `at`**. Si applica il template a tinte unite — un colore per
-slot — e si guarda il fotogramma prima e dopo ogni istante dichiarato:
+slot, ed è quello che fa `vedit slots templates/raffica --video`, che scrive
+`output/raffica-posti.mp4` — e si guarda il fotogramma prima e dopo ogni istante:
 
 ```python
 import yaml, numpy as np
 from moviepy import VideoFileClip
 
 istanti = [s["at"] for s in yaml.safe_load(open("templates/raffica/template.yaml"))["slots"]]
-v = VideoFileClip("output/prova.mp4")
+v = VideoFileClip("output/raffica-posti.mp4")
 for at in istanti[1:]:
     prima, dopo = v.get_frame(at - 0.05), v.get_frame(at + 0.05)
     assert np.abs(prima.mean(axis=(0, 1)) - dopo.mean(axis=(0, 1))).max() > 20, at

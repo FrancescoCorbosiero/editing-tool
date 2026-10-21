@@ -481,7 +481,7 @@ def extract(source: str | Path, destination: str | Path, name: str = "",
         source={
             "file": source.name,
             "duration": round(duration, 2),
-            "extracted": date.today().isoformat(),
+            "extracted": date.today(),
         },
         root=destination.resolve(),
     )
@@ -583,7 +583,7 @@ def render(template: Template, grid: str = "half") -> str:
     if template.source:
         righe.append("source:                 # da dove e' stato estratto: solo memoria")
         for chiave, valore in template.source.items():
-            righe.append(f"  {chiave}: {valore}")
+            righe.append(f"  {chiave}: {_yaml_value(valore)}")
         righe.append("")
 
     righe += [

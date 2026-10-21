@@ -60,29 +60,25 @@ Apri `templates/<nome>/template.yaml` e confrontalo con quello che hai visto:
   `stroke_color`, `bg_color`...). Se non ne ha, lascia lo stile di partenza;
 - `label` sui posti che contano (`apertura`, `pausa`, `chiusura`...): servono a
   parlarne con l'utente e compaiono nei riepiloghi;
-- un taglio mancato o di troppo: aggiungi o togli uno slot, spostando solo gli `at`.
+- un taglio mancato o di troppo: non riscrivere gli `at` a mano, usa `vedit slots`
+  (`--cut 4.45` aggiunge un taglio sulla griglia del battito, `--split 4` divide un
+  posto in parti uguali, `--merge 5` toglie il taglio fra il 4 e il 5). I numeri sono
+  quelli dell'elenco di `vedit slots templates/<nome>`, e il comando stampa come
+  tornare indietro.
 
 ## 5. Verifica che i tagli cadano sugli istanti
 
-Riempi il template con una tinta diversa per posto e controlla i fotogrammi prima e
-dopo ogni `at` (il metodo è in CLAUDE.md, "Verifica del risultato di un render"):
+Monta il template con una tinta diversa per posto, il suo numero sopra, sulla sua
+musica:
 
 ```bash
-python - <<'PY'
-from pathlib import Path
-from PIL import Image
-import colorsys, yaml
-n = len(yaml.safe_load(open("templates/<nome>/template.yaml"))["slots"])
-Path("<tmp>/tinte").mkdir(parents=True, exist_ok=True)
-for i in range(n):
-    r, g, b = (int(c * 255) for c in colorsys.hsv_to_rgb((i * 0.37) % 1, 0.9, 1 if i % 2 == 0 else 0.55))
-    Image.new("RGB", (720, 900), (r, g, b)).save(f"<tmp>/tinte/{i:02d}.png")
-PY
-vedit apply templates/<nome> <tmp>/tinte -o <tmp>/tinte.mp4
+vedit slots templates/<nome> --video        # scrive output/<nome>-posti.mp4
 ```
 
-Poi lo snippet di CLAUDE.md sugli `at`. Ogni taglio deve risultare; con una
-dissolvenza finale, la luce deve scendere fino al nero.
+Poi controlla i fotogrammi prima e dopo ogni `at` di quel video con lo snippet di
+CLAUDE.md ("Verifica del risultato di un render"). Ogni taglio deve risultare; con una
+dissolvenza finale, la luce deve scendere fino al nero. Guarda anche i provini:
+`vedit sheet output/<nome>-posti.mp4 --slots templates/<nome>`.
 
 ## 6. Salva e racconta
 
@@ -90,6 +86,25 @@ dissolvenza finale, la luce deve scendere fino al nero.
   fanno cosa), consigli per riempirlo;
 - fai il commit di `template.yaml` e della traccia audio (`.gitignore` li lascia
   passare apposta) e di nient'altro;
+- mandagli il video dei posti numerati (`output/<nome>-posti.mp4`): lo guarda con
+  la musica e ti dice se manca un taglio, chiamandolo per numero o per secondo;
 - di' all'utente, in poche righe: quanti posti, il tempo, lo stile, quali posti
   chiedono un video e quali un'immagine, e che adesso può mandarti media e testi
   (è il lavoro della skill `monta`).
+
+## Quando l'utente sente un battito che manca
+
+Succede, e non è un tuo errore: il template copia il riferimento, e il riferimento
+può non tagliare su un colpo che l'utente sente ("al drop sono quattro colpi e cambia
+tre volte"). Il suo orecchio vince sul riferimento.
+
+1. Trova i posti di quel momento: `vedit slots templates/<nome>` (entra a, dura,
+   battiti). Se serve sapere dove cadono i colpi, li elenca
+   `vedit beats templates/<nome>/audio.m4a --json` (la lista `onsets`).
+2. Correggi: `--cut <secondi>` per un colpo preciso, `--split N` (`--into K`) per
+   "K colpi dentro il posto N", `--merge N` per un taglio di troppo.
+3. Rifai il video dei posti (`--video`), verificalo come al passo 5 e mandalo
+   all'utente: deve sentire i tagli dove li voleva.
+4. `vedit slots` elenca gli edit che usano il template: in ognuno serve un media per
+   ogni posto nuovo, e i `slot:` dei testi vanno spostati (il comando dice come sono
+   cambiati i numeri). Aggiorna anche i numeri dei posti in `templates/README.md`.

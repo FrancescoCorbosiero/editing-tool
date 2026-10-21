@@ -373,7 +373,9 @@ def build_audio(spec: AudioSpec, project: Project, video_duration: float):
     usable = min(audio.duration, video_duration - spec.start)
     if usable <= 0:
         raise ValueError("La traccia audio inizia dopo la fine del video")
-    if audio.duration < video_duration - spec.start:
+    # Meno di un fotogramma di differenza non si sente: e' l'arrotondamento fra
+    # la durata dell'audio (in campioni) e quella del video (in fotogrammi).
+    if audio.duration < video_duration - spec.start - 1 / project.output.fps:
         log.warning(
             "La traccia audio (%.1fs) e' piu' corta del video (%.1fs): "
             "il finale restera' senza musica.",

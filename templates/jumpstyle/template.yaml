@@ -43,9 +43,10 @@ text:
   align: center
 
 source:                 # da dove e' stato estratto: solo memoria
-  file: jumpstyle-bootleg.mp4   # "il Marocco primo in Africa", montaggio su TikTok
+  file: jumpstyle-bootleg.mp4
   duration: 28.33
   extracted: 2026-10-21
+  note: montaggio su TikTok, "il Marocco primo in Africa"
 
 # ---------------------------------------------------------------------------
 # SLOT: 61 posti da riempire, in quest'ordine.

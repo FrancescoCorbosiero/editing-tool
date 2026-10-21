@@ -43,12 +43,13 @@ text:
   align: center
 
 source:                 # da dove e' stato estratto: solo memoria
-  file: edit.mp4           # un montaggio a tempo di musica su TikTok
+  file: edit.mp4
   duration: 18.13
   extracted: 2026-10-21
+  note: un montaggio a tempo di musica su TikTok
 
 # ---------------------------------------------------------------------------
-# SLOT: 32 posti da riempire, in quest'ordine.
+# SLOT: 33 posti da riempire, in quest'ordine.
 #
 # hint dice cosa c'era in quel posto nel video di riferimento: un video
 # (contenuto in movimento) o un'immagine ferma. E' un consiglio, non un
@@ -60,36 +61,37 @@ slots:
     label: apertura
   - at: 3.862             #  2)  dura 0.20s, 0.50 battiti
   - at: 4.06              #  3)  dura 0.20s, 0.50 battiti
-  - at: 4.258             #  4)  dura 0.40s, 1.00 battiti
-  - at: 4.654             #  5)  dura 0.40s, 1.00 battiti
-  - at: 5.051             #  6)  dura 0.40s, 1.00 battiti
-  - at: 5.447             #  7)  dura 0.40s, 1.00 battiti
-  - at: 5.843             #  8)  dura 0.40s, 1.00 battiti
-  - at: 6.239             #  9)  dura 0.40s, 1.00 battiti
-  - at: 6.635             # 10)  dura 0.33s, 0.84 battiti
-  - at: 6.967             # 11)  dura 0.17s, 0.42 battiti
-  - at: 7.133             # 12)  dura 0.43s, 1.09 battiti
-  - at: 7.567             # 13)  dura 0.26s, 0.65 battiti
-  - at: 7.823             # 14)  dura 0.40s, 1.00 battiti
-  - at: 8.219             # 15)  dura 0.40s, 1.00 battiti
-  - at: 8.615             # 16)  dura 0.40s, 1.00 battiti
-  - at: 9.011             # 17)  dura 0.40s, 1.00 battiti
-  - at: 9.407             # 18)  dura 0.40s, 1.00 battiti
-  - at: 9.803             # 19)  dura 0.40s, 1.00 battiti
-  - at: 10.199            # 20)  dura 0.30s, 0.76 battiti
-  - at: 10.5              # 21)  dura 0.17s, 0.42 battiti
-  - at: 10.667            # 22)  dura 0.32s, 0.82 battiti
-  - at: 10.991            # 23)  dura 0.40s, 1.00 battiti
-  - at: 11.387            # 24)  dura 0.40s, 1.00 battiti
-  - at: 11.783            # 25)  dura 1.98s, 5.00 battiti
+  - at: 4.258             #  4)  dura 0.20s, 0.50 battiti
+  - at: 4.456             #  5)  dura 0.20s, 0.50 battiti
+  - at: 4.654             #  6)  dura 0.40s, 1.00 battiti
+  - at: 5.051             #  7)  dura 0.40s, 1.00 battiti
+  - at: 5.447             #  8)  dura 0.40s, 1.00 battiti
+  - at: 5.843             #  9)  dura 0.40s, 1.00 battiti
+  - at: 6.239             # 10)  dura 0.40s, 1.00 battiti
+  - at: 6.635             # 11)  dura 0.33s, 0.84 battiti
+  - at: 6.967             # 12)  dura 0.17s, 0.42 battiti
+  - at: 7.133             # 13)  dura 0.43s, 1.10 battiti
+  - at: 7.567             # 14)  dura 0.26s, 0.65 battiti
+  - at: 7.823             # 15)  dura 0.40s, 1.00 battiti
+  - at: 8.219             # 16)  dura 0.40s, 1.00 battiti
+  - at: 8.615             # 17)  dura 0.40s, 1.00 battiti
+  - at: 9.011             # 18)  dura 0.40s, 1.00 battiti
+  - at: 9.407             # 19)  dura 0.40s, 1.00 battiti
+  - at: 9.803             # 20)  dura 0.40s, 1.00 battiti
+  - at: 10.199            # 21)  dura 0.30s, 0.76 battiti
+  - at: 10.5              # 22)  dura 0.17s, 0.42 battiti
+  - at: 10.667            # 23)  dura 0.32s, 0.82 battiti
+  - at: 10.991            # 24)  dura 0.40s, 1.00 battiti
+  - at: 11.387            # 25)  dura 0.40s, 1.00 battiti
+  - at: 11.783            # 26)  dura 1.98s, 5.00 battiti
     hint: image
     label: pausa
-  - at: 13.763            # 26)  dura 0.40s, 1.00 battiti
-  - at: 14.159            # 27)  dura 0.40s, 1.00 battiti
-  - at: 14.555            # 28)  dura 0.40s, 1.00 battiti
-  - at: 14.951            # 29)  dura 0.40s, 1.00 battiti
-  - at: 15.348            # 30)  dura 0.40s, 1.00 battiti
-  - at: 15.744            # 31)  dura 0.40s, 1.00 battiti
-  - at: 16.14             # 32)  dura 1.99s, 5.03 battiti
+  - at: 13.763            # 27)  dura 0.40s, 1.00 battiti
+  - at: 14.159            # 28)  dura 0.40s, 1.00 battiti
+  - at: 14.555            # 29)  dura 0.40s, 1.00 battiti
+  - at: 14.951            # 30)  dura 0.40s, 1.00 battiti
+  - at: 15.348            # 31)  dura 0.40s, 1.00 battiti
+  - at: 15.744            # 32)  dura 0.40s, 1.00 battiti
+  - at: 16.14             # 33)  dura 1.99s, 5.03 battiti
     hint: image
     label: chiusura

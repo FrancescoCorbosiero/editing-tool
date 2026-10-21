@@ -14,6 +14,8 @@ templates/raffica/
 vedit templates                                          # quali ho
 vedit new edits/mio-video --template templates/raffica   # un video nuovo su un template
 vedit extract un-video-che-mi-piace.mp4 -o templates/x   # un template nuovo
+vedit slots templates/raffica --video                    # i posti numerati sulla musica
+vedit slots templates/raffica --cut 4.45                 # un taglio in più, a orecchio
 ```
 
 ## Perché qui i media si versionano
@@ -43,7 +45,7 @@ grafici e diagrammi che si susseguono **a ogni battito**, su una base a 151,5 BP
 |---|---|
 | durata | 18,13s |
 | tempo | 151,5 BPM (un battito ogni 0,396s) |
-| posti | 32 |
+| posti | 33 |
 | formato | 720×1280 (verticale) @ 30 fps |
 | stile | media interi su nero (`contain`), si spegne nel nero negli ultimi 1,97s |
 | transizioni | stacchi netti |
@@ -52,12 +54,18 @@ La struttura, che è il motivo per cui funziona:
 
 | posti | cosa succede | nel riferimento |
 |---|---|---|
-| 1 (`apertura`) | quasi 4 secondi su un'immagine sola, mentre la musica parte | un video (un'animazione 3D) |
-| 2–3 | due stacchi da mezzo battito: l'ingresso nella raffica | due grafici in un lampo |
-| 4–24 | la raffica: un'immagine per battito, con due lampi da mezzo battito (posti 11 e 21) | screenshot e grafici |
-| 25 (`pausa`) | due secondi fermi: la musica respira, lo spettatore legge | un titolo di PubMed |
-| 26–31 | di nuovo la raffica | screenshot |
-| 32 (`chiusura`) | l'ultima immagine si spegne nel nero | una pagina di testo |
+| 1 (`apertura`) | quasi 4 secondi su un'immagine sola, mentre canta la voce | un video (un'animazione 3D) |
+| 2–5 | il **drop**: entra il basso con quattro colpi da mezzo battito, e a ogni colpo cambia l'immagine | tre grafici in un lampo (vedi sotto) |
+| 6–25 | la raffica: un'immagine per battito, con due lampi da mezzo battito (posti 12 e 22) | screenshot e grafici |
+| 26 (`pausa`) | due secondi fermi: la musica respira, lo spettatore legge | un titolo di PubMed |
+| 27–32 | di nuovo la raffica | screenshot |
+| 33 (`chiusura`) | l'ultima immagine si spegne nel nero | una pagina di testo |
+
+Il drop è l'unico punto in cui il template non copia il riferimento: lì il video
+originale cambiava immagine solo sui primi tre colpi del basso, e restava fermo sul
+quarto. Il quarto taglio (posto 5) è stato aggiunto a orecchio, con
+`vedit slots templates/raffica --cut 4.45`; per tornare al riferimento,
+`vedit slots templates/raffica --merge 5`.
 
 Per riempirlo bene:
 
@@ -65,8 +73,8 @@ Per riempirlo bene:
   in cui si decide se lo spettatore resta;
 - nella **raffica** vanno immagini che si capiscono in un colpo d'occhio: in 0,4
   secondi non si legge, si riconosce. Testi lunghi qui sono texture, e va bene così;
-- i **lampi** (posti 2–3, 11 e 21) durano un quinto di secondo: un'immagine qualsiasi
-  dà lo scatto, la stessa del posto prima lo nasconde;
+- i **lampi** (i quattro del drop, 2–5, e poi 12 e 22) durano un quinto di secondo:
+  un'immagine qualsiasi dà lo scatto, la stessa del posto prima lo nasconde;
 - la **pausa** è il posto per l'immagine che deve essere letta davvero, o per un testo;
 - i media entrano interi, con le bande nere: uno screenshot orizzontale resta
   leggibile da bordo a bordo invece di essere tagliato.
