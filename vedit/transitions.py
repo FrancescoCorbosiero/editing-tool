@@ -28,6 +28,30 @@ Una transizione puo' essere di due famiglie:
 
 `direction` indica sempre **il bordo da cui arriva il nuovo clip**:
 `left` = entra da sinistra e si muove verso destra.
+
+IL CONTRATTO
+------------
+- la firma e' sempre `(prev, current, ctx) -> (prev, current)`: si puo'
+  modificare anche il clip precedente (e' cosi' che `fade_through_black` gli
+  mette la dissolvenza in uscita);
+- `ctx` contiene `duration` (gia' limitata), `direction` e `size` (il canvas);
+- `overlaps=True` se i due clip devono coesistere nel tempo: lo usa
+  `timeline.py` per calcolare le posizioni;
+- `directional=True` se la funzione usa `ctx.direction`;
+- MoviePy si importa dentro la funzione, mai in cima al modulo.
+
+Per esempio, una dissolvenza attraverso il bianco:
+
+    @register("fade_through_white", overlaps=False)
+    def fade_through_white(prev, current, ctx):
+        from moviepy import vfx
+
+        half = ctx.duration / 2.0
+        bianco = [255, 255, 255]
+        return (
+            prev.with_effects([vfx.FadeOut(half, final_color=bianco)]),
+            current.with_effects([vfx.FadeIn(half, initial_color=bianco)]),
+        )
 """
 
 from __future__ import annotations

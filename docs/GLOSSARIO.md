@@ -32,6 +32,11 @@ materiale girato in formati diversi.
 all'audio e ai metadati (`.mp4`, `.mkv`, `.mov`). Sono cose diverse: un `.mp4` può
 contenere codec diversi, come un `.zip` può contenere qualsiasi cosa.
 
+**Orientamento EXIF** — le foto dei telefoni spesso sono salvate "di lato", con
+un'etichetta nei metadati che dice di quanto ruotarle. La galleria la rispetta e non
+te ne accorgi; un programma che legge i pixel così come sono la mostra storta. `vedit`
+la raddrizza prima di usarla.
+
 **Pixel format** (`yuv420p`) — come sono organizzati i colori dentro il flusso
 compresso. `yuv420p` tiene la luminosità a risoluzione piena e il colore a un quarto,
 perché l'occhio umano è molto più sensibile alla prima. È il formato che **tutti** i
@@ -126,8 +131,18 @@ dalla forma che assumono sulla timeline di una GUI. Sono il trucco più efficace
 rendere invisibile il montaggio di un dialogo. `vedit` non li supporta ancora:
 servirebbe poter sfalsare la traccia audio di un segmento rispetto al video.
 
+**Loop** — un pezzo che, finito, ricomincia da capo. È il modo naturale di una GIF,
+e di qualsiasi gesto breve che si ripete (un'onda, un lampeggio). In `vedit` un
+sorgente in loop più corto del suo posto riparte invece di rallentare.
+
+**Apertura e chiusura dal nero** (*fade in*, *fade out* del video) — tutto il video
+che si accende dal nero all'inizio o si spegne nel nero alla fine, testi compresi. È
+la punteggiatura più antica del cinema: dice "comincia" e "è finito". In `vedit` sono
+`fade_in`/`fade_out` del progetto, e lo `style` di un template se li porta dietro.
+
 **Montaggio** (*edit*) — sia l'attività sia il risultato. In inglese *editing* è
-l'attività, *the edit* il risultato.
+l'attività, *the edit* il risultato. In questo repo "edit" ha anche un significato
+preciso: vedi la sezione Template.
 
 **Export / rendering** — trasformare la descrizione del montaggio nel file finale.
 Rendering è il calcolo dei fotogrammi, export è il salvataggio: nella pratica si
@@ -162,12 +177,14 @@ fotografie d'archivio. Regola pratica: se lo noti, è troppo.
 **Safe area** (*title safe*, *action safe*) — il rettangolo interno entro cui tenere
 il testo perché non venga tagliato o coperto dall'interfaccia del player. Eredità dei
 televisori a tubo catodico, che tagliavano i bordi; oggi resta utile perché ogni
-piattaforma social sovrappone qualcosa (nomi, pulsanti, didascalie) ai margini.
-Regola pratica: lascia libero il 5-10% su ogni lato.
+piattaforma social sovrappone qualcosa ai margini: sui video verticali le schede in
+alto, la didascalia e il nome dell'autore in basso, i pulsanti a destra. Le posizioni
+`top` e `bottom` di `vedit` ci stanno dentro: il testo comincia al 12% dell'altezza,
+o finisce sopra l'ultimo 22%.
 
 **Lower third** — la scritta in basso che presenta chi sta parlando ("Mario Rossi,
 sindaco"). Si chiama così perché occupa il terzo inferiore dello schermo. In `vedit`
-è un overlay di testo con `position: ["center", <y verso il basso>]`.
+è un testo con `position: bottom`.
 
 **Watermark** — un logo semitrasparente presente per tutta la durata, per marcare la
 paternità del video.
@@ -212,10 +229,18 @@ istanti dei tagli e il formato, senza i media. È l'idea che su CapCut trovi com
 montaggio che su quella canzone funziona. Si estrae da un video di riferimento e si
 applica ai propri file.
 
-**Slot** — un posto nel montaggio descritto da un template: comincia a un istante
-preciso e finisce quando comincia il successivo. Non sa cosa ci finirà dentro — un
-video, una foto — sa solo quando comincia, come entra in scena e, se capitasse una
-foto, come muoverla.
+**Slot** (*posto*) — un posto nel montaggio descritto da un template: comincia a un
+istante preciso e finisce quando comincia il successivo. Non sa cosa ci finirà dentro
+— un video, una foto — sa solo quando comincia, come entra in scena e, se capitasse
+una foto, come muoverla. I posti si contano da 1.
+
+**Hint** — cosa c'era in un posto nel video di riferimento: un video (il contenuto
+si muoveva) o un'immagine ferma. È un consiglio per chi riempie il template: i
+montaggi migliori alternano riprese e foto, e il riferimento dice dove.
+
+**Edit** — un video fatto con un template: il file `edit.yaml` che dice quale media
+va in quale posto e quali testi compaiono, dove e quando. Il template è la parte che
+non cambia (la musica, i tagli, lo stile), l'edit quella che cambia a ogni video.
 
 **Rilevamento dei tagli** (*shot detection*) — capire da un video già montato dove
 sono stati fatti gli stacchi. `vedit` confronta gli **istogrammi** dei fotogrammi
@@ -226,6 +251,11 @@ cambia tutto. È la differenza fra riconoscere uno stacco e riconoscere un movim
 ---
 
 ## Flusso di lavoro
+
+**Provino** (*contact sheet*) — tanti fotogrammi di un video in un'immagine sola, per
+guardarlo tutto con un colpo d'occhio. Viene dalla fotografia su pellicola, dove il
+"provino a contatto" mostrava tutto il rullino in piccolo. In `vedit` lo produce
+`vedit sheet`, ed è il modo di controllare un render senza riprodurlo.
 
 **Anteprima** (*preview*) — un export veloce e brutto, fatto per guardare il
 montaggio, non la qualità. Se non lavori in anteprima, passerai la giornata ad
