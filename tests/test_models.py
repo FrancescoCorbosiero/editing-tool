@@ -87,3 +87,17 @@ def test_audio_opzionale():
     assert p2.audio is not None
     assert p2.audio.volume == 0.3
     assert p2.audio.replace is True
+
+
+def test_dissolvenze_di_apertura_e_chiusura():
+    p = Project.from_dict({
+        "timeline": [{"type": "color", "duration": 3}],
+        "fade_in": 0.5, "fade_out": 1.2,
+    })
+    assert (p.fade_in, p.fade_out) == (0.5, 1.2)
+    assert Project.from_dict({"timeline": [{"type": "color", "duration": 1}]}).fade_out == 0.0
+
+
+def test_dissolvenza_negativa():
+    with pytest.raises(ConfigError, match="fade_out"):
+        Project.from_dict({"timeline": [{"type": "color", "duration": 1}], "fade_out": -1})

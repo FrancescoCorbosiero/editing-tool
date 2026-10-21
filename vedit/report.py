@@ -60,6 +60,8 @@ class Report:
     fps: int
     rows: list[SegmentRow] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    fade_in: float = 0.0
+    fade_out: float = 0.0
 
     @property
     def duration(self) -> float:
@@ -108,6 +110,8 @@ def _segment_detail(seg: Segment, info: dict | None, duration: float | None = No
             parts.append(f"[{seg.start:g} -> fine]")
         if seg.speed != 1.0:
             parts.append(f"x{seg.speed:g}")
+        if seg.loop:
+            parts.append("in loop")
         if seg.mute:
             parts.append("muto")
     if info and info.get("width"):
@@ -210,7 +214,19 @@ def analyze(project: Project, project_path: Path | str = "") -> Report:
 
     _check_sources_consistency(report, project, cache, kinds)
     _check_audio(report, project, cache)
+    _check_fades(report, project)
     return report
+
+
+def _check_fades(report: Report, project: Project) -> None:
+    """Le dissolvenze di apertura e chiusura devono stare dentro il montaggio."""
+    report.fade_in, report.fade_out = project.fade_in, project.fade_out
+    if project.fade_in + project.fade_out > report.duration + 1e-6:
+        report.warnings.append(
+            f"le dissolvenze dal nero ({project.fade_in:g}s) e al nero "
+            f"({project.fade_out:g}s) durano piu' del montaggio ({report.duration:.2f}s): "
+            "si sovrapporranno e il video non arrivera' mai alla luce piena"
+        )
 
 
 def _check_cuts(report: Report, index: int, seg: Segment, info: dict | None) -> None:
@@ -223,7 +239,7 @@ def _check_cuts(report: Report, index: int, seg: Segment, info: dict | None) -> 
             f"timeline[{index}]: start={seg.start:g}s ma il file dura "
             f"{source_duration:.2f}s: il segmento risultera' vuoto"
         )
-    elif seg.end is not None and seg.end > source_duration + 0.05:
+    elif seg.end is not None and seg.end > source_duration + 0.05 and not seg.loop:
         report.warnings.append(
             f"timeline[{index}]: end={seg.end:g}s oltre la fine del file "
             f"({source_duration:.2f}s): verra' troncato"
@@ -330,6 +346,13 @@ def format_report(report: Report) -> str:
         f"Durata totale: {format_time(report.duration)}  ({report.duration:.2f}s, "
         f"{int(report.duration * report.fps)} fotogrammi)"
     )
+    dissolvenze = []
+    if report.fade_in:
+        dissolvenze.append(f"dal nero in {report.fade_in:g}s")
+    if report.fade_out:
+        dissolvenze.append(f"al nero negli ultimi {report.fade_out:g}s")
+    if dissolvenze:
+        lines.append(f"Dissolvenze : {', '.join(dissolvenze)}")
 
     if report.warnings:
         lines.append("")

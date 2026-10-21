@@ -8,6 +8,7 @@ niente, perche' il suo unico valore e' che i tagli stanno sui battiti.
 
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -373,3 +374,150 @@ def test_il_battito_di_una_traccia_si_converte_in_istanti():
     audio = AudioTrack(src="a.m4a", bpm=120.0, offset=0.25)
     assert audio.period == pytest.approx(0.5)
     assert audio.beat_of(2.25) == pytest.approx(4.0)
+
+
+# -- lo stile del template --------------------------------------------------
+
+def template_con_stile(tmp_path, stile=None, testo=None, **extra) -> Template:
+    traccia(tmp_path)
+    dati = {
+        "name": "prova",
+        "duration": 8.0,
+        "audio": {"src": "audio.m4a", "bpm": 120.0},
+        "format": {"size": [720, 1280], "fps": 30},
+        "slots": [{"at": 0.0}, {"at": 4.0, **extra}],
+    }
+    if stile is not None:
+        dati["style"] = stile
+    if testo is not None:
+        dati["text"] = testo
+    tpl = Template.from_dict(dati)
+    tpl.root = tmp_path
+    return tpl
+
+
+def test_senza_stile_i_media_riempiono_lo_schermo(tmp_path):
+    # I template scritti prima che lo stile esistesse continuano a funzionare.
+    tpl = template_con_stile(tmp_path)
+    assert tpl.style.fit == "cover"
+    assert (tpl.style.fade_in, tpl.style.fade_out) == (0.0, 0.0)
+
+
+def test_lo_stile_del_template_arriva_nel_progetto(tmp_path):
+    tpl = template_con_stile(tmp_path, stile={
+        "fit": "contain", "background": [10, 20, 30], "fade_in": 0.3, "fade_out": 1.5,
+    })
+    data = bind(tpl, [MediaRef(tmp_path / "a.jpg")], root=tmp_path).data
+
+    assert data["output"]["background"] == [10, 20, 30]
+    assert data["defaults"]["fit"] == "contain"
+    assert all(segmento["fit"] == "contain" for segmento in data["timeline"])
+    assert (data["fade_in"], data["fade_out"]) == (0.3, 1.5)
+
+    project = Project.from_dict(data)
+    assert (project.fade_in, project.fade_out) == (0.3, 1.5)
+    assert project.output.background == (10, 20, 30)
+
+
+def test_uno_slot_puo_scegliere_un_fit_diverso_dal_template(tmp_path):
+    tpl = template_con_stile(tmp_path, stile={"fit": "contain"}, fit="cover")
+    data = bind(tpl, [MediaRef(tmp_path / "a.jpg")], root=tmp_path).data
+    assert [s["fit"] for s in data["timeline"]] == ["contain", "cover"]
+
+
+def test_uno_stile_sbagliato_si_dice_subito(tmp_path):
+    with pytest.raises(TemplateError, match=r"style\.fit"):
+        template_con_stile(tmp_path, stile={"fit": "zoom"})
+    with pytest.raises(TemplateError, match=r"style\.background"):
+        template_con_stile(tmp_path, stile={"background": "nero"})
+    with pytest.raises(TemplateError, match="fade_out"):
+        template_con_stile(tmp_path, stile={"fade_out": -1})
+
+
+def test_lo_stile_dei_testi_parte_proporzionato_al_canvas(tmp_path):
+    tpl = template_con_stile(tmp_path)
+    stile = tpl.text_style
+    assert stile["font_size"] == 54                  # il 7.5% di 720
+    assert stile["color"] == "white" and stile["stroke_color"] == "black"
+
+
+def test_il_template_cambia_solo_quello_che_scrive_dello_stile_dei_testi(tmp_path):
+    tpl = template_con_stile(tmp_path, testo={"color": "yellow", "font_size": 70})
+    stile = tpl.text_style
+    assert (stile["color"], stile["font_size"]) == ("yellow", 70)
+    assert stile["stroke_color"] == "black"          # il resto resta quello di partenza
+
+
+def test_uno_stile_dei_testi_sbagliato_e_un_errore_del_template(tmp_path):
+    from vedit.models import ConfigError
+
+    with pytest.raises(ConfigError, match="align"):
+        template_con_stile(tmp_path, testo={"align": "giustificato"})
+
+
+def test_il_suggerimento_dello_slot_e_video_o_image(tmp_path):
+    tpl = template_con_stile(tmp_path, hint="video")
+    assert tpl.slots[1].hint == "video"
+    assert tpl.slots[1].to_dict()["hint"] == "video"
+    with pytest.raises(TemplateError, match="hint"):
+        template_con_stile(tmp_path, hint="audio")
+
+
+# -- GIF e loop -------------------------------------------------------------
+
+def gif(tmp_path, nome: str = "onda.gif", durata: float = 1.0):
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("serve ffmpeg")
+    path = tmp_path / nome
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                    "-i", f"testsrc=size=120x90:rate=10:duration={durata}", str(path)],
+                   check=True)
+    return path
+
+
+def test_una_gif_e_un_media():
+    assert media_kind(Path("onda.gif")) == "video"
+    assert MediaRef.parse("onda.gif").kind == "video"
+
+
+def test_una_cartella_include_le_gif(tmp_path):
+    (tmp_path / "a.jpg").write_bytes(b"x")
+    (tmp_path / "b.gif").write_bytes(b"x")
+    assert [r.path.name for r in expand_media([str(tmp_path)])] == ["a.jpg", "b.gif"]
+
+
+def test_una_gif_corta_riparte_invece_di_rallentare(tmp_path):
+    tpl = template(tmp_path, istanti=(0.0, 4.0), durata=8.0)
+    corta = gif(tmp_path, durata=1.0)
+    bound = bind(tpl, [MediaRef(corta)], root=tmp_path, durations={corta.resolve(): 1.0})
+
+    for segmento in bound.data["timeline"]:
+        assert segmento["loop"] is True
+        assert "speed" not in segmento          # niente rallentatore
+    assert not bound.warnings or all("rallentato" not in w for w in bound.warnings)
+    assert "in loop" in describe_bound(tpl, bound)
+
+
+def test_un_video_corto_si_puo_mandare_in_loop(tmp_path):
+    tpl = template(tmp_path, istanti=(0.0, 4.0), durata=8.0)
+    corto = video(tmp_path, "corto.mp4", durata=1.0)
+    ref = MediaRef(corto, loop=True)
+    bound = bind(tpl, [ref], root=tmp_path, durations={corto.resolve(): 1.0})
+    assert all(s["loop"] is True and "speed" not in s for s in bound.data["timeline"])
+
+
+def test_il_loop_riempie_davvero_il_posto(tmp_path):
+    """Una GIF da un secondo in un posto da quattro: il clip deve durare quattro."""
+    from vedit.builder import build_segment, close_all
+
+    corta = gif(tmp_path, durata=1.0)
+    project = Project.from_dict({
+        "output": {"size": [160, 120]},
+        "timeline": [{"type": "video", "src": str(corta), "loop": True, "end": 4.0}],
+    })
+    try:
+        clip = build_segment(project.timeline[0], project)
+        assert clip.duration == pytest.approx(4.0, abs=0.05)
+        assert clip.get_frame(3.5) is not None      # oltre la fine della GIF c'e' ancora immagine
+    finally:
+        close_all()

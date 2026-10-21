@@ -92,6 +92,16 @@ MAX_FRAMES = 12_000
 # frazione della larghezza (o dell'altezza) del fotogramma.
 DRIFT_THRESHOLD = 0.05
 
+# Sotto questa somiglianza fra due fotogrammi della stessa inquadratura il
+# contenuto si muove: era un video, non una foto. Una foto che si spegne in una
+# dissolvenza resta sopra (la forma non cambia, cambia solo la luce); una
+# ripresa, anche lenta, scende sotto in pochi decimi di secondo.
+STILL_SIMILARITY = 0.98
+
+# Quanto un pixel puo' scostarsi dal colore delle bande per farne parte: la
+# compressione sporca anche il nero piu' nero.
+BAND_TOLERANCE = 16
+
 
 @dataclass
 class Shot:
@@ -101,6 +111,8 @@ class Shot:
     start: float
     end: float
     drift: tuple[float, float] = (0.0, 0.0)   # scorrimento del contenuto, in frazione
+    moving: bool = False                      # il contenuto si muove: era un video
+    bands: tuple[int, int, int] | None = None  # colore delle bande, se ce ne sono
 
     @property
     def duration(self) -> float:
@@ -121,6 +133,10 @@ class ShotList:
     duration: float = 0.0
     fps: float = 0.0
     size: tuple[int, int] = (0, 0)
+    # Luminosita' media di ogni fotogramma analizzato, e a che ritmo sono stati
+    # analizzati: servono a riconoscere le dissolvenze dal e al nero.
+    brightness: list[float] = field(default_factory=list)
+    analysis_fps: float = 0.0
 
     @property
     def count(self) -> int:
@@ -319,13 +335,62 @@ def _best_shift(a: np.ndarray, b: np.ndarray, max_fraction: float = 0.25) -> flo
     return float(best_shift) if best_score > 0.6 else 0.0
 
 
-def suggest_motion(drift: tuple[float, float], fallback: str) -> str:
+def similarity(first: np.ndarray, last: np.ndarray) -> float:
+    """
+    Quanto si assomigliano due fotogrammi nella FORMA: 1 = identici.
+
+    E' la correlazione fra le due immagini in scala di grigi, dopo aver tolto a
+    ognuna la sua luminosita' media e il suo contrasto. Quel passaggio e' il
+    punto: una foto che si spegne in una dissolvenza cambia luce ma non forma,
+    e deve risultare ferma; un video che si muove cambia forma, anche se la
+    luce resta la stessa.
+    """
+    a = first.astype(np.float64).mean(axis=2) if first.ndim == 3 else first.astype(np.float64)
+    b = last.astype(np.float64).mean(axis=2) if last.ndim == 3 else last.astype(np.float64)
+    a = a - a.mean()
+    b = b - b.mean()
+    norm = np.sqrt((a * a).sum() * (b * b).sum())
+    if norm <= 1e-9:
+        # Due tinte piatte: nessuna forma da confrontare. Se sono la stessa
+        # tinta, il contenuto e' fermo.
+        return 1.0 if abs(float(first.mean()) - float(last.mean())) < 1 else 0.0
+    return float((a * b).sum() / norm)
+
+
+def detect_bands(frame: np.ndarray, tolerance: int = BAND_TOLERANCE) -> tuple[int, int, int] | None:
+    """
+    Il colore delle bande attorno al contenuto, oppure None se il contenuto
+    riempie il quadro.
+
+    Le bande sono quello che si vede quando un'immagine entra INTERA in un
+    formato diverso dal suo (una foto orizzontale in un video verticale): due
+    strisce di tinta unita, sopra e sotto oppure ai lati. Qui si cercano
+    proprio cosi': la prima e l'ultima riga (o colonna) tutte del colore degli
+    angoli. Un fotogramma tutto di un colore - il nero alla fine di una
+    dissolvenza - non conta: non ha un contenuto da incorniciare.
+    """
+    pixels = frame.astype(np.int16)
+    angoli = np.stack([pixels[0, 0], pixels[0, -1], pixels[-1, 0], pixels[-1, -1]])
+    colore = np.median(angoli, axis=0)
+    uguali = np.abs(pixels - colore).max(axis=2) <= tolerance
+    if uguali.all():
+        return None
+    righe, colonne = uguali.all(axis=1), uguali.all(axis=0)
+    if (righe[0] and righe[-1]) or (colonne[0] and colonne[-1]):
+        return tuple(int(np.rint(c)) for c in colore)  # type: ignore[return-value]
+    return None
+
+
+def suggest_motion(drift: tuple[float, float], fallback: str | None = None) -> str | None:
     """
     Il movimento da suggerire per uno slot, letto dallo scorrimento misurato.
 
     Attenzione al ribaltamento, lo stesso di motion.py: se il contenuto scorre
     verso destra e' la camera che va verso SINISTRA. I nomi dei movimenti
     descrivono la camera, come in qualsiasi software di montaggio.
+
+    Senza uno scorrimento evidente restituisce `fallback`, che di norma e' None:
+    un'inquadratura ferma suggerisce una foto ferma, non un movimento inventato.
     """
     dx, dy = drift
     if abs(dx) >= abs(dy) and abs(dx) > DRIFT_THRESHOLD:
@@ -384,6 +449,9 @@ def analyze(path, sensitivity: float = SENSITIVITY, min_shot: float = MIN_SHOT,
         last = min(max(last, 0), len(frames) - 1)
         if last > first:
             shot.drift = estimate_drift(frames[first], frames[last])
+            shot.moving = similarity(frames[first], frames[last]) < STILL_SIMILARITY
+        middle = min(max(round(shot.middle * analysis_fps), 0), len(frames) - 1)
+        shot.bands = detect_bands(frames[middle])
 
     return ShotList(
         cuts=cuts,
@@ -391,6 +459,8 @@ def analyze(path, sensitivity: float = SENSITIVITY, min_shot: float = MIN_SHOT,
         duration=round(duration, 4),
         fps=fps,
         size=(info.get("width") or 0, info.get("height") or 0),
+        brightness=[round(float(v), 2) for v in frames.mean(axis=(1, 2, 3))],
+        analysis_fps=analysis_fps,
     )
 
 
@@ -408,18 +478,22 @@ def describe(result: ShotList, path: str) -> str:
         f"Tagli    : {len(result.cuts)} ({result.count} inquadrature, "
         f"in media {result.average:.2f}s l'una)",
         "",
-        "  #   inizio     fine   durata  movimento",
+        "  #   inizio     fine   durata  contenuto  scorrimento  bande",
     ]
     for shot in result.shots:
-        movimento = suggest_motion(shot.drift, "fermo")
+        contenuto = "video" if shot.moving else "fermo"
+        scorrimento = suggest_motion(shot.drift) or "-"
+        bande = f"rgb{shot.bands}" if shot.bands else "-"
         lines.append(
-            f"{shot.index:3d}  {shot.start:7.2f}  {shot.end:7.2f}  {shot.duration:6.2f}s"
-            f"  {movimento}"
+            f"{shot.index + 1:3d}  {shot.start:7.2f}  {shot.end:7.2f}  {shot.duration:6.2f}s"
+            f"  {contenuto:<9}  {scorrimento:<11}  {bande}"
         )
 
     lines += [
         "",
-        "Il movimento e' quello del CONTENUTO letto sui fotogrammi: serve a "
-        "suggerire cosa fare di una foto che finisse in quella posizione.",
+        "contenuto: 'video' se l'immagine si muove dentro l'inquadratura, 'fermo' se e'",
+        "una foto (anche se si spegne in una dissolvenza). scorrimento: la panoramica",
+        "letta sui fotogrammi. bande: il colore attorno al contenuto, se non riempie",
+        "il quadro.",
     ]
     return "\n".join(lines)

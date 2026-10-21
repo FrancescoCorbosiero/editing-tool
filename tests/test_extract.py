@@ -17,6 +17,10 @@ from vedit.extract import (
     MOTION_MIN_SLOT,
     build_slots,
     describe,
+    detect_fade_in,
+    detect_fade_out,
+    detect_fit,
+    drop_inside_fades,
     drop_short,
     extract,
     motion_amount,
@@ -24,7 +28,7 @@ from vedit.extract import (
     snap,
     subdivisions,
 )
-from vedit.scenes import ShotList
+from vedit.scenes import Shot, ShotList
 from vedit.templates import Template, TemplateError
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None,
@@ -145,19 +149,34 @@ def test_il_movimento_cresce_con_la_durata_dello_slot():
 
 def test_gli_slot_brevissimi_restano_fermi():
     """Un movimento di due decimi di secondo si legge come un tremolio."""
-    shots = ShotList(duration=2.0)
+    shots = inquadrature((0, 0.3, (0.2, 0.0), False), (0.3, 0.6, (0.2, 0.0), False))
     slots = build_slots([0.3], shots, duration=0.6)
     assert all(s.motion is None for s in slots)
 
 
-def test_gli_slot_lunghi_ricevono_un_movimento():
-    shots = ShotList(duration=6.0)
-    slots = build_slots([3.0], shots, duration=6.0)
+def inquadrature(*specs) -> ShotList:
+    """Inquadrature finte: (inizio, fine, scorrimento, in movimento)."""
+    shots = [Shot(index=i, start=a, end=b, drift=drift, moving=moving)
+             for i, (a, b, drift, moving) in enumerate(specs)]
+    return ShotList(shots=shots, duration=shots[-1].end if shots else 0.0)
 
-    assert slots[0].motion is not None
-    assert slots[1].motion is not None
-    # Alternati, cosi' dieci foto di fila non zoomano tutte nello stesso verso.
-    assert slots[0].motion != slots[1].motion
+
+def test_uno_slot_fermo_nel_riferimento_resta_fermo():
+    """
+    Niente movimenti inventati: se nel riferimento l'immagine era ferma, la
+    foto messa li' resta ferma. Un template riproduce un video, non lo abbellisce.
+    """
+    shots = inquadrature((0, 3, (0.0, 0.0), False), (3, 6, (0.0, 0.0), False))
+    slots = build_slots([3.0], shots, duration=6.0)
+    assert all(s.motion is None for s in slots)
+
+
+def test_uno_slot_che_scorreva_riceve_la_stessa_panoramica():
+    # Il contenuto scivola verso destra: e' la camera che va a sinistra.
+    shots = inquadrature((0, 3, (0.2, 0.0), False), (3, 6, (0.0, -0.2), False))
+    slots = build_slots([3.0], shots, duration=6.0)
+    assert slots[0].motion == "pan_left"
+    assert slots[1].motion == "pan_down"
 
 
 def test_la_soglia_del_movimento_e_la_durata_dello_slot():
@@ -165,11 +184,73 @@ def test_la_soglia_del_movimento_e_la_durata_dello_slot():
     sopra = MOTION_MIN_SLOT + 0.2
     sotto = MOTION_MIN_SLOT - 0.2
 
-    lunghi = build_slots([sopra], ShotList(), duration=sopra * 2)
-    brevi = build_slots([sotto], ShotList(), duration=sotto * 2)
+    def scorrono(durata):
+        return inquadrature((0, durata, (0.2, 0.0), False),
+                            (durata, durata * 2, (0.2, 0.0), False))
+
+    lunghi = build_slots([sopra], scorrono(sopra), duration=sopra * 2)
+    brevi = build_slots([sotto], scorrono(sotto), duration=sotto * 2)
 
     assert all(s.motion is not None for s in lunghi)
     assert all(s.motion is None for s in brevi)
+
+
+def test_con_i_media_interi_nessun_movimento():
+    # Per muoversi una foto deve riempire lo schermo: con `contain` la si
+    # taglierebbe, e il template mostra i media interi apposta.
+    shots = inquadrature((0, 3, (0.2, 0.0), False), (3, 6, (0.2, 0.0), False))
+    slots = build_slots([3.0], shots, duration=6.0, fit="contain")
+    assert all(s.motion is None for s in slots)
+
+
+def test_il_suggerimento_dice_dove_c_era_un_video():
+    shots = inquadrature((0, 3, (0.0, 0.0), True), (3, 6, (0.0, 0.0), False),
+                         (6, 6.3, (0.0, 0.0), True))
+    slots = build_slots([3.0, 6.0], shots, duration=6.3)
+    assert [s.hint for s in slots] == ["video", "image", None]   # l'ultimo e' un lampo
+
+
+# -- lo stile del riferimento -----------------------------------------------
+
+def test_dissolvenza_al_nero_finale():
+    # Due secondi a luce piena, poi un secondo di discesa regolare fino al nero
+    luce = [120.0] * 60 + [120.0 - 4 * i for i in range(1, 31)]
+    assert detect_fade_out(luce, fps=30) == pytest.approx(1.0, abs=0.05)
+    assert detect_fade_in(luce, fps=30) == 0.0
+
+
+def test_un_taglio_sul_nero_non_e_una_dissolvenza():
+    # Il video finisce con uno stacco netto su un fotogramma nero
+    luce = [120.0] * 60 + [2.0] * 5
+    assert detect_fade_out(luce, fps=30) == 0.0
+
+
+def test_dissolvenza_dal_nero_iniziale():
+    # Dal nero a luce piena in poco meno di venti fotogrammi
+    luce = [3.0 + 6 * i for i in range(20)] + [120.0] * 30
+    assert detect_fade_in(luce, fps=30) == pytest.approx(0.65, abs=0.05)
+
+
+def test_i_tagli_dentro_una_dissolvenza_non_contano():
+    assert drop_inside_fades([1.0, 4.0, 5.8], duration=6.0, fade_in=0.0, fade_out=1.5) == [1.0, 4.0]
+    assert drop_inside_fades([0.2, 3.0], duration=6.0, fade_in=0.5, fade_out=0.0) == [3.0]
+
+
+def test_media_interi_se_quasi_tutto_ha_le_bande():
+    shots = ShotList(shots=[
+        Shot(index=0, start=0, end=4, bands=(0, 0, 0)),
+        Shot(index=1, start=4, end=5, bands=None),        # una foto gia' verticale
+        Shot(index=2, start=5, end=8, bands=(2, 1, 0)),
+    ])
+    assert detect_fit(shots) == ("contain", (0, 0, 0))
+
+
+def test_a_tutto_schermo_se_le_bande_sono_poche():
+    shots = ShotList(shots=[
+        Shot(index=0, start=0, end=4, bands=None),
+        Shot(index=1, start=4, end=5, bands=(0, 0, 0)),
+    ])
+    assert detect_fit(shots)[0] == "cover"
 
 
 # -- l'estrazione vera ------------------------------------------------------
@@ -231,6 +312,36 @@ def test_dal_template_estratto_si_monta_davvero(tmp_path):
     project.validate_files()
 
     assert project.cut_positions() == [s.at for s in result.template.slots]
+
+
+def test_riconosce_bande_e_dissolvenza_finale(tmp_path):
+    """
+    Il caso del template `raffica`: immagini intere su nero in un video
+    verticale, e l'ultima che si spegne nel nero. Lo stile deve uscire da solo.
+    """
+    path = tmp_path / "verticale.mp4"
+    ingressi, catena = [], ""
+    for i, (colore, durata) in enumerate([("red", 2.0), ("blue", 2.0), ("yellow", 2.0)]):
+        ingressi += ["-f", "lavfi", "-i", f"color=c={colore}:s=90x50:r=30:d={durata}"]
+        catena += f"[{i}:v]pad=90:160:0:55:black[v{i}];"
+    catena += "[v0][v1][v2]concat=n=3:v=1:a=0,fade=t=out:st=4.5:d=1.5[v]"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", *ingressi,
+         "-f", "lavfi", "-i", "aevalsrc='sin(2*PI*60*t)*exp(-14*mod(t,0.5))':d=6:s=44100",
+         "-filter_complex", catena, "-map", "[v]", "-map", "3:a",
+         "-c:a", "aac", "-pix_fmt", "yuv420p", "-shortest", str(path)],
+        check=True,
+    )
+
+    template = extract(path, tmp_path / "tpl").template
+    assert template.style.fit == "contain"
+    assert template.style.background == (0, 0, 0)
+    assert template.style.fade_out == pytest.approx(1.5, abs=0.15)
+    assert template.style.fade_in == 0.0
+    # La dissolvenza non e' un taglio: restano i due stacchi veri
+    assert len(template.slots) == 3
+    assert all(s.motion is None for s in template.slots)
+    assert [s.hint for s in template.slots] == ["image", "image", "image"]
 
 
 def test_un_video_senza_audio_non_produce_un_template_audio(tmp_path):

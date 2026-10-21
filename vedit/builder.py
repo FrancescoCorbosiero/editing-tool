@@ -126,14 +126,28 @@ def build_segment(seg: Segment, project: Project, target: float | None = None):
         clip = VideoFileClip(str(path))
         _OPEN_CLIPS.append(clip)
 
-        if target is not None and seg.end is None:
-            # Si prende dal sorgente esattamente quanto serve. A velocita'
-            # diversa da 1 ne serve di piu' (o di meno): due secondi di
-            # montaggio a 2x mangiano quattro secondi di girato.
-            source_start = seg.start or 0
-            clip = clip.subclipped(source_start, source_start + target * seg.speed)
-        elif seg.start is not None or seg.end is not None:
-            clip = clip.subclipped(seg.start or 0, seg.end)
+        # Quanto sorgente serve: fino a `end` se c'e', altrimenti quanto chiede
+        # il posto sul montaggio. A velocita' diversa da 1 ne serve di piu' (o
+        # di meno): due secondi di montaggio a 2x mangiano quattro secondi di
+        # girato.
+        source_start = seg.start or 0
+        if seg.end is not None:
+            needed = seg.end - source_start
+        elif target is not None:
+            needed = target * seg.speed
+        else:
+            needed = None                       # fino alla fine del file
+
+        if needed is None:
+            if seg.start is not None:
+                clip = clip.subclipped(source_start)
+        elif seg.loop and clip.duration - source_start < needed - 1e-3:
+            # Un sorgente piu' corto del suo posto ricomincia da capo invece di
+            # rallentare: e' quello che fa una GIF, e per un gesto breve che si
+            # ripete (un'onda, un lampeggio) e' anche la cosa naturale.
+            clip = clip.subclipped(source_start).with_effects([vfx.Loop(duration=needed)])
+        else:
+            clip = clip.subclipped(source_start, source_start + needed)
 
         if seg.speed != 1.0:
             clip = clip.with_effects([vfx.MultiplySpeed(seg.speed)])
@@ -383,6 +397,17 @@ def build(project: Project):
 
     if layers:
         video = CompositeVideoClip([video, *layers], size=size).with_duration(video.duration)
+
+    # Le dissolvenze di apertura e chiusura vanno applicate DOPO gli overlay:
+    # un testo che resta acceso mentre tutto il resto si spegne nel nero
+    # sembrerebbe un errore.
+    fades = []
+    if project.fade_in > 0:
+        fades.append(vfx.FadeIn(min(project.fade_in, video.duration)))
+    if project.fade_out > 0:
+        fades.append(vfx.FadeOut(min(project.fade_out, video.duration)))
+    if fades:
+        video = video.with_effects(fades)
 
     if project.audio is not None:
         from moviepy import CompositeAudioClip

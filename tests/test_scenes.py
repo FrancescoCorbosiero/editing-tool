@@ -13,6 +13,7 @@ import subprocess
 import numpy as np
 import pytest
 
+from vedit import scenes
 from vedit.scenes import (
     BINS,
     Shot,
@@ -230,3 +231,39 @@ def test_il_riepilogo_elenca_le_inquadrature():
 
     assert "2 inquadrature" in testo
     assert "1920x1080" in testo
+
+
+# -- foto o video, bande -----------------------------------------------------
+
+def test_una_foto_che_si_spegne_resta_una_foto():
+    """
+    In una dissolvenza al nero la luce cambia ma la forma no: non e' un video.
+    E' il caso dell'ultima immagine del riferimento di `raffica`.
+    """
+    rng = np.random.default_rng(1)
+    foto = rng.integers(0, 255, (36, 64, 3)).astype(np.uint8)
+    spenta = (foto * 0.3).astype(np.uint8)
+    assert scenes.similarity(foto, spenta) > scenes.STILL_SIMILARITY
+
+
+def test_un_contenuto_che_si_sposta_e_un_video():
+    rng = np.random.default_rng(2)
+    scena = rng.integers(0, 255, (36, 80, 3)).astype(np.uint8)
+    assert scenes.similarity(scena[:, :64], scena[:, 12:76]) < scenes.STILL_SIMILARITY
+
+
+def test_riconosce_le_bande_sopra_e_sotto():
+    fotogramma = np.zeros((36, 64, 3), dtype=np.uint8)
+    fotogramma[10:26] = (200, 120, 40)                 # una foto orizzontale al centro
+    assert scenes.detect_bands(fotogramma) == (0, 0, 0)
+
+
+def test_un_fotogramma_pieno_non_ha_bande():
+    rng = np.random.default_rng(3)
+    fotogramma = rng.integers(40, 255, (36, 64, 3)).astype(np.uint8)
+    assert scenes.detect_bands(fotogramma) is None
+
+
+def test_un_fotogramma_tutto_nero_non_ha_bande():
+    # Il nero alla fine di una dissolvenza non incornicia niente.
+    assert scenes.detect_bands(np.zeros((36, 64, 3), dtype=np.uint8)) is None

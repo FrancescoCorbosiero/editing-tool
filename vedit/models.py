@@ -224,6 +224,7 @@ class Segment:
     direction: str | None = None          # bordo di provenienza per slide e wipe
     speed: float = 1.0
     mute: bool = False
+    loop: bool = False             # solo per type=video: se finisce prima, ricomincia
     color: tuple[int, int, int] = (0, 0, 0)
     motion: str | None = None      # solo per image: vedi vedit/motion.py
     amount: float = 0.15           # quanto movimento: 0.15 = ingrandimento del 15%
@@ -254,6 +255,12 @@ class Segment:
                 raise ConfigError(f"{where}: speed deve essere > 0")
 
         seg.mute = bool(data.get("mute", False))
+
+        seg.loop = bool(data.get("loop", False))
+        if seg.loop and seg_type != "video":
+            raise ConfigError(
+                f"{where}: loop si applica solo ai segmenti 'video' (questo e' '{seg_type}')"
+            )
 
         if "fit" in data:
             seg.fit = str(data["fit"])
@@ -484,6 +491,10 @@ class Project:
     timeline: list[Segment] = field(default_factory=list)
     overlays: list[Overlay] = field(default_factory=list)
     audio: AudioSpec | None = None
+    # Dissolvenza dal nero all'inizio e al nero alla fine di TUTTO il video,
+    # testi compresi: e' il modo classico di aprire e chiudere un montaggio.
+    fade_in: float = 0.0
+    fade_out: float = 0.0
     root: Path = Path(".")   # i percorsi relativi si risolvono da qui
 
     @classmethod
@@ -520,6 +531,13 @@ class Project:
         ]
         audio = _collect(errors, AudioSpec.from_dict, data.get("audio"))
 
+        fades = {}
+        for key in ("fade_in", "fade_out"):
+            value = float(data.get(key) or 0.0)
+            if value < 0:
+                errors.append(f"{key} non puo' essere negativo")
+            fades[key] = max(value, 0.0)
+
         _raise_all(errors, "Il progetto contiene errori")
 
         return cls(
@@ -528,6 +546,7 @@ class Project:
             timeline=[s for s in segments if s is not None],
             overlays=[o for o in overlays if o is not None],
             audio=audio,
+            **fades,
         )
 
     def resolve(self, path: Path | str) -> Path:
@@ -666,7 +685,10 @@ class Project:
         for i, ov in enumerate(self.overlays):
             if ov.src is not None:
                 refs.append((f"overlays[{i}] (immagine)", self.resolve(ov.src)))
-            if ov.style.font and _looks_like_font_file(ov.style.font):
+            # Un elenco di candidati ("A.ttf, Arial") lo risolve fonts.py, che
+            # prende il primo che esiste: qui si controlla solo il font singolo.
+            font = ov.style.font
+            if font and "," not in font and _looks_like_font_file(font):
                 refs.append((f"overlays[{i}] (font)", self.resolve(ov.style.font)))
 
         if self.audio is not None:

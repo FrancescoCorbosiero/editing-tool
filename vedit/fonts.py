@@ -84,9 +84,20 @@ def find_font(value: str | None, root: Path | None = None) -> Path | None:
 
     `value` puo' essere un percorso (assoluto o relativo alla cartella del
     progetto) oppure il nome di un font installato. `None` chiede il default.
+
+    Piu' candidati separati da virgole si provano in ordine, e vince il primo
+    che esiste: `DejaVu Sans Bold, Arial Bold` da' lo stesso aspetto su Linux e
+    su un Mac, dove i font installati non sono gli stessi.
     """
     if not value:
         return default_font()
+
+    if "," in value:
+        for candidato in value.split(","):
+            trovato = find_font(candidato.strip(), root) if candidato.strip() else None
+            if trovato is not None:
+                return trovato
+        return None
 
     candidate = Path(value).expanduser()
     if candidate.suffix.lower() in FONT_SUFFIXES:

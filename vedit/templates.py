@@ -49,7 +49,7 @@ import yaml
 # `_require` e' privato di models, e viene riusato qui apposta: un campo che
 # manca deve produrre lo stesso messaggio in un progetto e in un template, e due
 # implementazioni gemelle divergerebbero alla prima correzione.
-from .models import FIT_MODES, ConfigError, Project, _require
+from .models import FIT_MODES, ConfigError, Project, TextStyle, _require
 from .motion import names as motion_names
 from .timeline import clamp_overlap, durations_from_positions
 from .transitions import DIRECTIONS, normalize_direction
@@ -60,11 +60,44 @@ MANIFEST = "template.yaml"
 
 # Estensioni trattate come immagini: tutto il resto si apre come video.
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic")
-VIDEO_SUFFIXES = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpg", ".mpeg")
+# Una GIF animata e' un video senza audio, per chi monta: ffmpeg la legge come
+# tale. L'unica differenza la fa `bind`, che la manda in loop invece di
+# rallentarla quando e' piu' corta del suo posto.
+LOOP_SUFFIXES = (".gif",)
+VIDEO_SUFFIXES = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpg", ".mpeg",
+                  *LOOP_SUFFIXES)
 
 # Sotto questa velocita' un video rallentato per riempire uno slot non sembra
 # piu' un rallentatore, sembra un fermo immagine che scatta.
 MIN_SPEED = 0.25
+
+# Che cosa c'era in uno slot nel video di riferimento: un'indicazione per chi
+# lo riempie, non un obbligo.
+HINTS = ("video", "image")
+
+# I candidati per il font dei testi, in ordine: vince il primo installato (vedi
+# fonts.find_font). DejaVu c'e' su quasi ogni Linux, Arial Bold su Mac e Windows.
+DEFAULT_FONT = "DejaVu Sans Bold, Arial Bold, arialbd"
+
+
+def default_text_style(size: tuple[int, int]) -> dict[str, Any]:
+    """
+    Lo stile di partenza dei testi, proporzionato al canvas.
+
+    Bianco con un contorno nero, grassetto, centrato: e' lo stile dei testi sui
+    video verticali perche' si legge sopra qualsiasi cosa, chiara o scura, senza
+    bisogno di un riquadro.
+    """
+    corpo = max(16, round(size[0] * 0.075))
+    return {
+        "font": DEFAULT_FONT,
+        "font_size": corpo,
+        "color": "white",
+        "stroke_color": "black",
+        "stroke_width": max(2, round(corpo * 0.07)),
+        "max_width": 0.84,
+        "align": "center",
+    }
 
 
 class TemplateError(ConfigError):
@@ -93,6 +126,7 @@ class MediaRef:
 
     path: Path
     start: float = 0.0
+    loop: bool | None = None       # None = deciso dal tipo di file (le GIF si', i video no)
 
     @classmethod
     def parse(cls, value: str) -> MediaRef:
@@ -152,7 +186,8 @@ class Slot:
     direction: str = "left"
     motion: str | None = None          # suggerito: vale solo se ci finisce una foto
     amount: float = 0.15
-    fit: str = "cover"
+    fit: str | None = None             # None = quello dello stile del template
+    hint: str | None = None            # cosa c'era nel riferimento: video o image
     label: str = ""
 
     @classmethod
@@ -194,6 +229,10 @@ class Slot:
             slot.fit = str(data["fit"]).strip().lower()
             if slot.fit not in FIT_MODES:
                 raise TemplateError(f"{where}: fit deve essere uno di {FIT_MODES}")
+        if data.get("hint") is not None:
+            slot.hint = str(data["hint"]).strip().lower()
+            if slot.hint not in HINTS:
+                raise TemplateError(f"{where}: hint deve essere uno di {HINTS}")
         slot.label = str(data.get("label", "") or "")
         return slot
 
@@ -208,8 +247,10 @@ class Slot:
         if self.motion:
             data["motion"] = self.motion
             data["amount"] = round(self.amount, 3)
-        if self.fit != "cover":
+        if self.fit:
             data["fit"] = self.fit
+        if self.hint:
+            data["hint"] = self.hint
         if self.label:
             data["label"] = self.label
         return data
@@ -249,6 +290,45 @@ class AudioTrack:
 
 
 @dataclass
+class TemplateStyle:
+    """
+    Come il template mostra i media: vale per tutti gli slot.
+
+    E' la parte del "look" di un video che non dipende da cosa ci metti dentro:
+    se le immagini entrano intere su uno sfondo (`contain`) o riempiono lo
+    schermo tagliando i bordi (`cover`), e come si apre e si chiude il video.
+    """
+
+    fit: str = "cover"
+    background: tuple[int, int, int] = (0, 0, 0)   # colore delle bande con `contain`
+    fade_in: float = 0.0       # secondi di dissolvenza dal nero all'inizio
+    fade_out: float = 0.0      # secondi di dissolvenza al nero alla fine
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> TemplateStyle:
+        data = data or {}
+        if not isinstance(data, dict):
+            raise TemplateError("style deve essere una mappa YAML")
+        style = cls()
+        if data.get("fit") is not None:
+            style.fit = str(data["fit"]).strip().lower()
+            if style.fit not in FIT_MODES:
+                raise TemplateError(f"style.fit deve essere uno di {FIT_MODES}")
+        if data.get("background") is not None:
+            colore = data["background"]
+            if not isinstance(colore, (list, tuple)) or len(colore) != 3:
+                raise TemplateError("style.background deve essere [R, G, B]")
+            style.background = tuple(int(c) for c in colore)  # type: ignore[assignment]
+        for key in ("fade_in", "fade_out"):
+            if data.get(key) is not None:
+                value = float(data[key])
+                if value < 0:
+                    raise TemplateError(f"style.{key} non puo' essere negativo")
+                setattr(style, key, value)
+        return style
+
+
+@dataclass
 class Template:
     """Un montaggio riutilizzabile: la traccia, il formato, i posti da riempire."""
 
@@ -258,6 +338,8 @@ class Template:
     size: tuple[int, int] = (1080, 1920)
     fps: int = 30
     slots: list[Slot] = field(default_factory=list)
+    style: TemplateStyle = field(default_factory=TemplateStyle)
+    text: dict[str, Any] = field(default_factory=dict)     # stile dei testi, solo le modifiche
     source: dict[str, Any] = field(default_factory=dict)   # da dove viene: documentazione
     root: Path = Path(".")                # la cartella del template.yaml
 
@@ -299,6 +381,10 @@ class Template:
         if not isinstance(size, (list, tuple)) or len(size) != 2:
             raise TemplateError("format.size deve essere una lista [larghezza, altezza]")
 
+        testo = data.get("text") or {}
+        if not isinstance(testo, dict):
+            raise TemplateError("text deve essere una mappa YAML con lo stile dei testi")
+
         template = cls(
             name=str(data.get("name", "") or ""),
             audio=AudioTrack.from_dict(data.get("audio")),
@@ -306,6 +392,8 @@ class Template:
             size=(int(size[0]), int(size[1])),
             fps=int(formato.get("fps", 30)),
             slots=[Slot.from_dict(s, i) for i, s in enumerate(slots_data)],
+            style=TemplateStyle.from_dict(data.get("style")),
+            text=dict(testo),
             source=dict(data.get("source") or {}),
         )
         template.validate()
@@ -341,6 +429,15 @@ class Template:
                     f"slots[{i}]: la transizione dura {slot.transition:g}s ma dal taglio "
                     f"precedente passano {spazio:g}s: non c'e' spazio per farla"
                 )
+
+        # Lo stile dei testi si controlla subito, non al primo edit che lo usa:
+        # un errore nel template e' un errore del template.
+        TextStyle.from_dict(self.text_style, "text")
+
+    @property
+    def text_style(self) -> dict[str, Any]:
+        """Lo stile dei testi completo: quello di partenza, con le modifiche del template."""
+        return {**default_text_style(self.size), **self.text}
 
     def resolve(self, path: Path | str) -> Path:
         """I percorsi dentro un template sono relativi alla sua cartella."""
@@ -390,6 +487,7 @@ class Binding:
     media: MediaRef
     span: float                  # quanti secondi di montaggio deve coprire
     speed: float = 1.0           # < 1 = rallentato per arrivare in fondo allo slot
+    loop: bool = False           # ricomincia da capo se finisce prima dello slot
 
 
 @dataclass
@@ -496,6 +594,9 @@ def bind(template: Template, media: list[MediaRef], output: Path | str | None = 
 
         if kind == "video":
             segmento["start"] = round(ref.start, 3)
+            loop = ref.loop if ref.loop is not None else percorso.suffix.lower() in LOOP_SUFFIXES
+            if loop:
+                segmento["loop"] = True
             disponibile = durations.get(percorso)
             if disponibile is not None:
                 resta = disponibile - ref.start
@@ -504,7 +605,7 @@ def bind(template: Template, media: list[MediaRef], output: Path | str | None = 
                         f"slot {i + 1}: {ref.path.name} dura {disponibile:.2f}s, "
                         f"non c'e' niente dopo il secondo {ref.start:g}"
                     )
-                if resta < span - 0.02:
+                if resta < span - 0.02 and not loop:
                     # Rallentare per arrivare in fondo allo slot e' quello che
                     # farebbe un montatore: il taglio successivo cade sul
                     # battito, e quel battito non si sposta per fare spazio a un
@@ -545,10 +646,11 @@ def bind(template: Template, media: list[MediaRef], output: Path | str | None = 
         # sempre il canvas da solo (vedi motion.py), e dichiararlo produrrebbe
         # solo un avviso in --check.
         if not segmento.get("motion"):
-            segmento["fit"] = slot.fit
+            segmento["fit"] = slot.fit or template.style.fit
 
         timeline.append(segmento)
-        bindings.append(Binding(slot=slot, media=ref, span=span, speed=speed))
+        bindings.append(Binding(slot=slot, media=ref, span=span, speed=speed,
+                                loop=bool(segmento.get("loop"))))
 
     audio_path = template.resolve(template.audio.src)
     if not audio_path.exists():
@@ -564,11 +666,12 @@ def bind(template: Template, media: list[MediaRef], output: Path | str | None = 
             "path": str(destinazione),
             "size": list(size or template.size),
             "fps": int(fps or template.fps),
+            "background": list(template.style.background),
         },
         "defaults": {
             "transition": 0.0,
             "transition_type": "cut",
-            "fit": "cover",
+            "fit": template.style.fit,
         },
         "timeline": timeline,
         "audio": {
@@ -589,6 +692,11 @@ def bind(template: Template, media: list[MediaRef], output: Path | str | None = 
     for segmento in data["timeline"]:
         if segmento["type"] == "video":
             segmento["mute"] = not keep_audio
+
+    if template.style.fade_in > 0:
+        data["fade_in"] = template.style.fade_in
+    if template.style.fade_out > 0:
+        data["fade_out"] = template.style.fade_out
 
     return Bound(data=data, bindings=bindings, warnings=warnings)
 
@@ -615,6 +723,8 @@ def describe_bound(template: Template, bound: Bound) -> str:
         dettagli = []
         if binding.speed != 1.0:
             dettagli.append(f"rallentato {binding.speed:g}x")
+        if binding.loop:
+            dettagli.append("in loop")
         if binding.media.kind == "image" and binding.slot.motion:
             dettagli.append(binding.slot.motion)
         if binding.slot.transition > 0 and i > 0:
@@ -622,7 +732,7 @@ def describe_bound(template: Template, bound: Bound) -> str:
 
         coda = f"   ({', '.join(dettagli)})" if dettagli else ""
         lines.append(
-            f"{i:3d}  {binding.slot.at:8.2f}  {binding.span:5.2f}s  "
+            f"{i + 1:3d}  {binding.slot.at:8.2f}  {binding.span:5.2f}s  "
             f"{binding.media.describe()}{coda}"
         )
 

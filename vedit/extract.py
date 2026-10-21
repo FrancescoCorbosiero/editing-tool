@@ -36,7 +36,15 @@ from pathlib import Path
 
 from . import beats, scenes
 from .ffmpeg_tools import FFmpegError, ensure_ffmpeg, probe
-from .templates import MANIFEST, AudioTrack, Slot, Template, TemplateError
+from .templates import (
+    MANIFEST,
+    AudioTrack,
+    Slot,
+    Template,
+    TemplateError,
+    TemplateStyle,
+    default_text_style,
+)
 
 # Suddivisioni su cui si puo' allineare un taglio.
 #   beat    = solo sui battiti          (montaggio lento, un'immagine per battito)
@@ -57,6 +65,22 @@ MIN_SLOT = 0.25
 # Un movimento su uno slot piu' corto di cosi' non si legge come movimento, si
 # legge come un tremolio: le foto piu' brevi restano ferme.
 MOTION_MIN_SLOT = 0.6
+
+# Sotto questa durata non vale la pena dire cosa c'era nel riferimento: in un
+# lampo di mezzo secondo va bene qualsiasi cosa, video o foto.
+HINT_MIN_SLOT = 0.6
+
+# Una dissolvenza al nero finisce in un fotogramma quasi nero (luminosita' media
+# sotto questa soglia, su 255) e lo raggiunge per gradi: un salto di luce piu'
+# grande di MAX_FADE_STEP fra due fotogrammi e' un taglio, non una dissolvenza.
+DARK = 12.0
+MAX_FADE_STEP = 8.0
+MIN_FADE = 0.2
+
+# Quante inquadrature con le bande servono per dire che il riferimento mostra
+# i media interi (`contain`): la maggioranza, non tutte, perche' basta una foto
+# gia' verticale per riempire il quadro da sola.
+CONTAIN_SHARE = 0.6
 
 # Quanto movimento per ogni secondo di slot. Il movimento va misurato in
 # velocita', non in quantita': lo stesso 15% percorso in quattro secondi e' una
@@ -201,6 +225,97 @@ def drop_short(cuts: list[float], duration: float, minimum: float) -> tuple[list
     return tenuti, scartati
 
 
+def detect_fade_out(brightness: list[float], fps: float) -> float:
+    """
+    Quanti secondi dura la dissolvenza al nero con cui finisce il video (0 = nessuna).
+
+    Si parte dall'ultimo fotogramma, che deve essere quasi nero, e si torna
+    indietro finche' la luce non scende e non salta di colpo (un salto e' un
+    taglio). Si arriva cosi' all'inizio dell'ultima inquadratura, e dentro di
+    lei la dissolvenza comincia dove la luce si stacca dal suo livello pieno:
+    prima, l'immagine era semplicemente accesa.
+    """
+    if fps <= 0 or len(brightness) < 3 or brightness[-1] > DARK:
+        return 0.0
+    fine = len(brightness) - 1
+    i = fine
+    while i > 0:
+        salita = brightness[i - 1] - brightness[i]
+        if salita < -0.5 or salita > MAX_FADE_STEP:
+            break
+        i -= 1
+
+    pieno = brightness[i]
+    buio = brightness[-1]
+    escursione = pieno - buio
+    if escursione < 2 * DARK:
+        return 0.0
+
+    # L'inizio si ricava dalla PENDENZA della discesa, misurata nel suo tratto
+    # centrale (fra il 75% e il 25% della luce) e prolungata all'indietro fino
+    # al livello pieno. Cercare il primo fotogramma "meno luminoso" sbaglierebbe
+    # di qualche fotogramma: all'inizio la discesa si confonde con il rumore
+    # di compressione.
+    alto = next(j for j in range(i, fine + 1) if brightness[j] <= buio + 0.75 * escursione)
+    basso = next(j for j in range(alto, fine + 1) if brightness[j] <= buio + 0.25 * escursione)
+    if basso > alto:
+        pendenza = (brightness[alto] - brightness[basso]) / (basso - alto)
+        inizio = max(float(i), alto - (pieno - brightness[alto]) / pendenza)
+    else:
+        inizio = float(alto)
+    # Fino alla fine dell'ultimo fotogramma, cioe' alla fine del video: e' la
+    # stessa misura che usa il builder per applicare la dissolvenza.
+    durata = (fine + 1 - inizio) / fps
+    return round(durata, 2) if durata >= MIN_FADE else 0.0
+
+
+def detect_fade_in(brightness: list[float], fps: float) -> float:
+    """Quanti secondi dura la dissolvenza dal nero con cui comincia il video (0 = nessuna)."""
+    return detect_fade_out(list(reversed(brightness)), fps)
+
+
+def detect_fit(shots: scenes.ShotList) -> tuple[str, tuple[int, int, int]]:
+    """
+    Come il riferimento mostra i media: interi con le bande (`contain`) o a
+    tutto schermo (`cover`), e il colore delle bande.
+
+    Conta il tempo, non il numero di inquadrature: un'apertura di quattro
+    secondi pesa piu' di un lampo di due decimi.
+    """
+    totale = sum(shot.duration for shot in shots.shots)
+    con_bande = [shot for shot in shots.shots if shot.bands is not None]
+    if not totale or sum(s.duration for s in con_bande) / totale < CONTAIN_SHARE:
+        return "cover", (0, 0, 0)
+
+    # Il colore piu' frequente, pesato per durata: di solito il nero.
+    pesi: dict[tuple[int, int, int], float] = {}
+    for shot in con_bande:
+        colore = tuple(round(c / 16) * 16 for c in shot.bands)  # type: ignore[union-attr]
+        pesi[colore] = pesi.get(colore, 0.0) + shot.duration    # type: ignore[index]
+    colore = max(pesi, key=pesi.__getitem__)
+    return "contain", tuple(min(255, c) for c in colore)  # type: ignore[return-value]
+
+
+def drop_inside_fades(cuts: list[float], duration: float,
+                      fade_in: float, fade_out: float) -> list[float]:
+    """
+    Toglie i tagli che cadono dentro una dissolvenza di apertura o chiusura.
+
+    Mentre un'immagine si spegne nel nero i fotogrammi cambiano di continuo, e
+    il rilevatore puo' scambiare l'ultimo passo per un taglio: ma una
+    dissolvenza e' un'inquadratura sola che si spegne, non due.
+    """
+    # Due fotogrammi di margine: il taglio che APRE l'ultima inquadratura cade
+    # spesso proprio dove comincia la dissolvenza, e quello e' un taglio vero.
+    margine = 0.07
+    inizio_chiusura = duration - fade_out
+    return [
+        cut for cut in cuts
+        if not (fade_in and cut < fade_in - margine)
+        and not (fade_out and cut > inizio_chiusura + margine)
+    ]
+
+
 def motion_amount(duration: float) -> float:
     """
     Quanto movimento dare a uno slot lungo `duration`.
@@ -216,14 +331,23 @@ def motion_amount(duration: float) -> float:
 
 
 def build_slots(cuts: list[float], shots: scenes.ShotList, duration: float,
-                transition: float = 0.0, transition_type: str = "crossfade") -> list[Slot]:
+                transition: float = 0.0, transition_type: str = "crossfade",
+                fit: str = "cover") -> list[Slot]:
     """
     Da tagli a slot: ogni taglio apre un posto, il primo si apre a zero.
 
-    Il movimento suggerito viene dall'inquadratura del riferimento che copriva
-    quel pezzo di tempo: se li' la camera scorreva, una foto messa nello stesso
-    punto scorrera' allo stesso modo. Sugli slot brevi non si suggerisce niente,
-    perche' un movimento di mezzo secondo si vede come un tremolio.
+    Di ogni posto si guarda l'inquadratura del riferimento che lo copriva:
+
+    - se il suo contenuto si muoveva, il posto chiede un **video** (`hint`):
+      e' li' che il riferimento alternava le riprese alle foto;
+    - se la camera scorreva, una foto messa nello stesso punto scorrera' allo
+      stesso modo (`motion`). Se era ferma, la foto resta ferma: un movimento
+      inventato cambierebbe il video invece di riprodurlo.
+
+    Il movimento si suggerisce solo con `fit: cover`: per muoversi una foto
+    deve riempire lo schermo, e in un template che mostra i media interi la
+    taglierebbe. Sugli slot brevi non si suggerisce niente, perche' un
+    movimento di mezzo secondo si vede come un tremolio.
     """
     istanti = [0.0, *cuts]
     slots: list[Slot] = []
@@ -232,16 +356,17 @@ def build_slots(cuts: list[float], shots: scenes.ShotList, duration: float,
         fine = istanti[i + 1] if i + 1 < len(istanti) else duration
         durata = fine - at
 
+        # L'inquadratura del riferimento che stava in scena a meta' slot.
+        centro = at + durata / 2
+        shot = next((s for s in shots.shots if s.start <= centro < s.end), None)
+
         movimento = None
-        quantita = motion_amount(durata)
-        if durata >= MOTION_MIN_SLOT:
-            # L'inquadratura del riferimento che stava in scena a meta' slot.
-            centro = at + durata / 2
-            shot = next((s for s in shots.shots if s.start <= centro < s.end), None)
-            # Alternare le chiusure e le aperture evita che dieci foto di fila
-            # zoomino tutte nello stesso verso, che si nota e stanca.
-            ripiego = "zoom_in" if len(slots) % 2 == 0 else "zoom_out"
-            movimento = scenes.suggest_motion(shot.drift, ripiego) if shot else ripiego
+        if shot is not None and fit == "cover" and durata >= MOTION_MIN_SLOT:
+            movimento = scenes.suggest_motion(shot.drift)
+
+        hint = None
+        if shot is not None and durata >= HINT_MIN_SLOT:
+            hint = "video" if shot.moving else "image"
 
         # Niente `label`: sarebbe "slot-03" allo slot numero 3, cioe' rumore.
         # Chi vuole dare un nome a un posto ("il ritornello") lo scrive a mano.
@@ -250,7 +375,8 @@ def build_slots(cuts: list[float], shots: scenes.ShotList, duration: float,
             transition=transition if i > 0 else 0.0,
             transition_type=transition_type if transition else "cut",
             motion=movimento,
-            amount=quantita,
+            amount=motion_amount(durata),
+            hint=hint,
         ))
 
     return slots
@@ -310,18 +436,26 @@ def extract(source: str | Path, destination: str | Path, name: str = "",
             "invece stacca, riprova con --sensitivity piu' bassa"
         )
 
-    # 3. L'allineamento al battito.
+    # 3. Lo stile: media interi o a tutto schermo, dissolvenze di apertura e
+    #    chiusura. I tagli dentro una dissolvenza non sono tagli.
+    fit, background = detect_fit(shots)
+    fade_in = detect_fade_in(shots.brightness, shots.analysis_fps)
+    fade_out = detect_fade_out(shots.brightness, shots.analysis_fps)
+    tagli = drop_inside_fades(shots.cuts, duration, fade_in, fade_out)
+
+    # 4. L'allineamento al battito.
     divisions = GRIDS[grid]
     valori, step = subdivisions(beat_grid, divisions, duration)
-    allineati, spostati, medio = snap(shots.cuts, valori, step)
+    allineati, spostati, medio = snap(tagli, valori, step)
 
-    # 4. Via gli slot che nessuno riuscirebbe a riempire.
+    # 5. Via gli slot che nessuno riuscirebbe a riempire.
     puliti, fusi = drop_short(allineati, duration, min_slot)
 
-    # 5. La traccia audio, che da qui in poi e' parte del template.
+    # 6. La traccia audio, che da qui in poi e' parte del template.
     destination.mkdir(parents=True, exist_ok=True)
     audio_file = extract_audio(source, destination / "audio.m4a")
 
+    size = (info["width"] or 1080, info["height"] or 1920)
     template = Template(
         name=name or destination.name,
         audio=AudioTrack(
@@ -330,9 +464,12 @@ def extract(source: str | Path, destination: str | Path, name: str = "",
             offset=beat_grid.beats[0] if beat_grid.beats else 0.0,
         ),
         duration=round(duration, 4),
-        size=(info["width"] or 1080, info["height"] or 1920),
+        size=size,
         fps=round(info["fps"] or 30),
-        slots=build_slots(puliti, shots, duration, transition, transition_type),
+        slots=build_slots(puliti, shots, duration, transition, transition_type, fit),
+        style=TemplateStyle(fit=fit, background=background,
+                            fade_in=fade_in, fade_out=fade_out),
+        text=default_text_style(size),
         source={
             "file": source.name,
             "duration": round(duration, 2),
@@ -366,6 +503,16 @@ def _riga(chiave: str, valore: str, commento: str, colonna: int = 26) -> str:
     return f"{testo.ljust(colonna)}# {commento}" if commento else testo
 
 
+def _yaml_value(valore) -> str:
+    """Un valore scalare scritto come lo leggerebbe YAML, virgolette solo se servono."""
+    import yaml
+
+    testo = yaml.safe_dump(valore, default_flow_style=True, allow_unicode=True)
+    # Uno scalare da solo esce come "valore\n...\n": il "..." e' la fine del
+    # documento YAML, che dentro un file piu' grande non serve.
+    return testo.split("\n...")[0].strip()
+
+
 def render(template: Template, grid: str = "half") -> str:
     """
     Il `template.yaml`, scritto a mano invece che con yaml.dump.
@@ -375,6 +522,7 @@ def render(template: Template, grid: str = "half") -> str:
     e' l'ottavo battito e non una durata, altrimenti non lo correggera' mai.
     """
     audio = template.audio
+    style = template.style
     beats_per_slot = template.beats_per_slot
     gaps = template.gaps()
 
@@ -408,7 +556,21 @@ def render(template: Template, grid: str = "half") -> str:
               "si puo' cambiare quando lo applichi: --size 1080x1920"),
         f"  fps: {template.fps}",
         "",
+        "# Come entrano i media: vale per tutti gli slot.",
+        "style:",
+        _riga("  fit", style.fit,
+              "contain = interi, con le bande; cover = a tutto schermo, tagliando i bordi"),
+        _riga("  background", f"[{', '.join(str(c) for c in style.background)}]",
+              "colore delle bande"),
+        _riga("  fade_in", f"{style.fade_in:g}", "secondi di dissolvenza dal nero all'inizio"),
+        _riga("  fade_out", f"{style.fade_out:g}", "secondi di dissolvenza al nero alla fine"),
+        "",
+        "# Lo stile dei testi che metterai negli edit. Ogni testo puo' cambiarlo.",
+        "text:",
     ]
+    for chiave, valore in template.text_style.items():
+        righe.append(f"  {chiave}: {_yaml_value(valore)}")
+    righe.append("")
 
     if template.source:
         righe.append("source:                 # da dove e' stato estratto: solo memoria")
@@ -420,8 +582,9 @@ def render(template: Template, grid: str = "half") -> str:
         "# ---------------------------------------------------------------------------",
         f"# SLOT: {len(template.slots)} posti da riempire, in quest'ordine.",
         "#",
-        "# motion vale solo se in quello slot finisce una FOTO (un video si muove",
-        "# gia' per conto suo). Toglilo, o cambialo, se non ti convince.",
+        "# hint dice cosa c'era in quel posto nel video di riferimento: un video",
+        "# (contenuto in movimento) o un'immagine ferma. E' un consiglio, non un",
+        "# obbligo. motion vale solo se in quello slot finisce una FOTO.",
         "# ---------------------------------------------------------------------------",
         "slots:",
     ]
@@ -460,8 +623,16 @@ def describe(result: Extraction, destination: Path) -> str:
         )
     else:
         lines.append("Tempo    : non rilevato")
+    style = template.style
+    aspetto = ("media interi su rgb" + str(style.background) + " (contain)"
+               if style.fit == "contain" else f"media a tutto schermo ({style.fit})")
+    if style.fade_in:
+        aspetto += f", si apre dal nero in {style.fade_in:g}s"
+    if style.fade_out:
+        aspetto += f", si spegne nel nero in {style.fade_out:g}s"
     lines += [
         f"Formato  : {template.size[0]}x{template.size[1]} @ {template.fps} fps",
+        f"Stile    : {aspetto}",
         f"Slot     : {len(template.slots)}  "
         f"(il piu' corto {min(gaps):.2f}s, il piu' lungo {max(gaps):.2f}s)",
     ]
@@ -474,14 +645,14 @@ def describe(result: Extraction, destination: Path) -> str:
     if result.merged:
         lines.append(f"Scartati : {result.merged} tagli troppo ravvicinati per essere slot")
 
-    lines += ["", "  #   entra a   dura   battiti  transizione  movimento"]
+    lines += ["", "  #   entra a   dura   battiti  transizione  nel riferimento  movimento"]
     for i, slot in enumerate(template.slots):
         battiti = template.beats_per_slot[i]
         transizione = (f"{slot.transition_type} {slot.transition:g}s"
                        if slot.transition > 0 else "cut")
         lines.append(
-            f"{i:3d}  {slot.at:8.2f}  {gaps[i]:5.2f}s  {battiti:7.2f}  "
-            f"{transizione:<12} {slot.motion or '-'}"
+            f"{i + 1:3d}  {slot.at:8.2f}  {gaps[i]:5.2f}s  {battiti:7.2f}  "
+            f"{transizione:<12} {slot.hint or '-':<16} {slot.motion or '-'}"
         )
 
     if result.warnings:
