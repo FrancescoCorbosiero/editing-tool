@@ -537,9 +537,9 @@ def _portable(path: Path, root: Path) -> str:
     mentre un percorso assoluto vale solo su quella che l'ha scritto.
     """
     try:
-        return os.path.relpath(Path(path).resolve(), Path(root).resolve())
+        return Path(os.path.relpath(Path(path).resolve(), Path(root).resolve())).as_posix()
     except ValueError:                      # dischi diversi, su Windows
-        return str(Path(path).resolve())
+        return Path(path).resolve().as_posix()
 
 
 def _quote(value: str) -> str:

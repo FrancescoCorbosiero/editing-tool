@@ -519,14 +519,20 @@ def _relative_to(path: Path, base: Path) -> str:
     resta spostabile, e leggibile), assoluto altrimenti: una catena di `../..`
     che risale mezzo disco non e' piu' portabile di un percorso assoluto, e' solo
     piu' difficile da capire.
+
+    Sempre con le barre `/`, anche su Windows: un YAML scritto su Windows con
+    `media\\foto.jpg` non si aprirebbe su Linux o su un Mac, mentre `media/foto.jpg`
+    funziona ovunque, Windows compreso.
     """
     path = path.resolve()
     base = base.resolve()
     try:
         relativo = Path(os.path.relpath(path, base))
     except ValueError:                      # dischi diversi, su Windows
-        return str(path)
-    return str(path) if relativo.parts and relativo.parts[0] == ".." else str(relativo)
+        return path.as_posix()
+    if relativo.parts and relativo.parts[0] == "..":
+        return path.as_posix()
+    return relativo.as_posix()
 
 
 def assign(template: Template, media: list[MediaRef],
@@ -670,7 +676,7 @@ def bind(template: Template, media: list[MediaRef], output: Path | str | None = 
 
     data: dict[str, Any] = {
         "output": {
-            "path": str(destinazione),
+            "path": Path(destinazione).as_posix(),
             "size": list(size or template.size),
             "fps": int(fps or template.fps),
             "background": list(template.style.background),
