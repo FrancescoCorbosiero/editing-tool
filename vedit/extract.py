@@ -70,8 +70,10 @@ MIN_SLOT = 0.15
 MOTION_MIN_SLOT = 0.6
 
 # Sotto questa durata non vale la pena dire cosa c'era nel riferimento: in un
-# lampo di mezzo secondo va bene qualsiasi cosa, video o foto.
-HINT_MIN_SLOT = 0.6
+# lampo va bene qualsiasi cosa, video o foto. Un battito intero invece conta
+# gia' (0.54s a 111 BPM): un montaggio di sole riprese e uno di sole foto
+# sulla stessa canzone sono due video diversi.
+HINT_MIN_SLOT = 0.45
 
 # Una dissolvenza al nero finisce in un fotogramma quasi nero (luminosita' media
 # sotto questa soglia, su 255) e lo raggiunge per gradi: un salto di luce piu'

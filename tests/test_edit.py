@@ -325,6 +325,16 @@ def test_lo_scheletro_ha_un_posto_per_slot_e_si_rilegge(repo):
     assert "dura 2.00s" in testo
 
 
+def test_lo_scheletro_mostra_le_etichette_dei_posti(tmp_path):
+    crea_template(tmp_path / "templates" / "etichette", istanti=(0.0, 2.0), durata=4.0,
+                  extra={"slots": [{"at": 0.0, "label": "apertura"}, {"at": 2.0}]})
+    template = Template.from_yaml(tmp_path / "templates" / "etichette")
+    root = tmp_path / "edits" / "e"
+    root.mkdir(parents=True)
+    testo = skeleton(template, template.root, root, "e")
+    assert "[apertura]" in testo
+
+
 def test_lo_scheletro_usa_i_media_che_gli_si_danno(repo):
     from vedit.templates import expand_media
 
