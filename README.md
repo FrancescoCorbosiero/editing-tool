@@ -472,14 +472,34 @@ winget install Gyan.FFmpeg       # Windows
 sudo apt install ffmpeg          # Ubuntu/Debian
 ```
 
-**2. Python 3.10+**, dalla cartella del repo:
+Dopo l'installazione apri un terminale nuovo, e `ffmpeg -version` deve rispondere.
+
+**2. Python 3.10+**, dalla cartella del repo (quella con `pyproject.toml`).
+
+macOS e Linux:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"          # installa vedit, pytest e ruff
 vedit templates                  # se risponde, funziona
 ```
+
+Windows (PowerShell), un comando per riga:
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+vedit templates
+```
+
+Su Windows `python` spesso apre il Microsoft Store invece di Python: è un collegamento
+di sistema ("alias di esecuzione dell'app") che intercetta il comando. `py`, il
+launcher installato insieme a Python, lo evita; dentro l'ambiente attivato `python`
+torna a funzionare. Se `Activate.ps1` dice che l'esecuzione di script è disabilitata,
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` la permette per quella
+finestra sola. L'ambiente va riattivato in ogni terminale nuovo.
 
 `-e` (*editable*) collega il progetto alla cartella invece di copiarlo: le modifiche
 al codice sono attive subito. `python -m vedit ...` funziona anche senza installare.
