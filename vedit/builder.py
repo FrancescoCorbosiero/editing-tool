@@ -1,0 +1,568 @@
+"""
+Costruzione della timeline MoviePy a partire da un Project.
+
+NOTA IMPORTANTE SULLE VERSIONI
+------------------------------
+Questo codice usa l'API di MoviePy 2.x:
+  - `from moviepy import ...`  (il namespace `moviepy.editor` NON esiste piu')
+  - `.subclipped()` al posto di `.subclip()`
+  - `.with_start()` / `.with_duration()` / `.with_position()` al posto di `.set_*()`
+  - effetti come classi:  `.with_effects([vfx.CrossFadeIn(1.0)])`
+
+La maggior parte dei tutorial online e' ancora ferma alla 1.x e non funziona qui.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from pathlib import Path
+
+from moviepy import (
+    AudioFileClip,
+    ColorClip,
+    CompositeVideoClip,
+    ImageClip,
+    VideoFileClip,
+    afx,
+    vfx,
+)
+
+from . import motion, transitions
+from .models import AudioSpec, Overlay, Project, Segment, TextStyle, place
+from .motion import MotionContext
+from .progress import RenderProgress, format_duration
+from .text import render_text
+from .timeline import (
+    clamp_overlap,
+    effective_overlaps,
+    plan,
+    plan_anchored,
+    total_duration,
+)
+from .transitions import TransitionContext, TransitionRequest
+
+log = logging.getLogger("vedit")
+
+# Tiene traccia dei clip aperti per poterli chiudere a fine render:
+# MoviePy apre un processo ffmpeg per ogni file sorgente.
+_OPEN_CLIPS: list = []
+
+
+# --------------------------------------------------------------------------
+# Helper geometrici
+# --------------------------------------------------------------------------
+
+def fit_clip(clip, size: tuple[int, int], mode: str):
+    """
+    Adatta un clip al canvas di output.
+
+    contain : rientra tutto, con bande nere (letterbox)
+    cover   : riempie il canvas, tagliando l'eccesso
+    stretch : deforma per riempire (da evitare, ma a volte serve)
+    """
+    target_w, target_h = size
+    src_w, src_h = clip.size
+
+    if mode == "stretch":
+        return clip.resized((target_w, target_h))
+
+    scale_contain = min(target_w / src_w, target_h / src_h)
+    scale_cover = max(target_w / src_w, target_h / src_h)
+    scale = scale_contain if mode == "contain" else scale_cover
+
+    clip = clip.resized(scale)
+
+    if mode == "cover":
+        # Ritaglio centrale alle dimensioni esatte del canvas
+        clip = clip.with_effects([
+            vfx.Crop(
+                width=target_w,
+                height=target_h,
+                x_center=clip.w / 2,
+                y_center=clip.h / 2,
+            )
+        ])
+
+    return clip
+
+
+def load_still(path: Path):
+    """
+    Una foto come array RGBA, raddrizzata.
+
+    Le foto dei telefoni sono spesso salvate "di lato", con un'etichetta EXIF
+    che dice di quanto ruotarle: chi le guarda in galleria non se ne accorge,
+    ma chi legge i pixel cosi' come sono le mostra storte. `exif_transpose`
+    applica la rotazione una volta per tutte.
+    """
+    from PIL import Image, ImageOps
+
+    with Image.open(path) as image:
+        return ImageOps.exif_transpose(image).convert("RGBA")
+
+
+def still_on_canvas(path: Path, size: tuple[int, int], mode: str,
+                    background: tuple[int, int, int]):
+    """
+    Una foto ferma gia' adattata al canvas: un fotogramma solo, calcolato una volta.
+
+    Passare da fit_clip + place_on_canvas darebbe lo stesso risultato, ma
+    ricomporrebbe la foto sullo sfondo a ogni fotogramma: trenta volte al
+    secondo lo stesso lavoro, per un'immagine che non cambia. Qui la si
+    prepara una volta con Pillow e il clip non deve fare altro che restituirla.
+    Le regole sono quelle di fit_clip: `contain` intera con le bande,
+    `cover` a tutto schermo tagliando al centro, `stretch` deformata.
+    """
+    import numpy as np
+    from PIL import Image
+
+    image = load_still(path)
+    width, height = size
+    if mode == "stretch":
+        image = image.resize((width, height), Image.LANCZOS)
+    else:
+        scala = (min if mode == "contain" else max)(width / image.width, height / image.height)
+        image = image.resize((max(1, round(image.width * scala)),
+                              max(1, round(image.height * scala))), Image.LANCZOS)
+    if image.width > width or image.height > height:
+        # cover: si tiene il centro, come il Crop di fit_clip
+        left, top = (image.width - width) // 2, (image.height - height) // 2
+        image = image.crop((max(left, 0), max(top, 0),
+                            max(left, 0) + min(width, image.width),
+                            max(top, 0) + min(height, image.height)))
+
+    canvas = Image.new("RGBA", size, (*background, 255))
+    canvas.alpha_composite(image, ((width - image.width) // 2, (height - image.height) // 2))
+    return np.asarray(canvas.convert("RGB"))
+
+
+def place_on_canvas(clip, size: tuple[int, int], background: tuple[int, int, int]):
+    """
+    Centra il clip su uno sfondo delle dimensioni esatte del canvas.
+    Serve per avere segmenti tutti della stessa dimensione: senza questo,
+    concatenare clip di risoluzioni diverse produce risultati imprevedibili.
+    """
+    if tuple(clip.size) == tuple(size):
+        return clip
+
+    bg = ColorClip(size=size, color=background, duration=clip.duration)
+    composed = CompositeVideoClip([bg, clip.with_position("center")], size=size)
+    composed = composed.with_duration(clip.duration)
+    if clip.audio is not None:
+        composed = composed.with_audio(clip.audio)
+    return composed
+
+
+# --------------------------------------------------------------------------
+# Costruzione dei singoli segmenti
+# --------------------------------------------------------------------------
+
+def build_segment(seg: Segment, project: Project, target: float | None = None):
+    """
+    Trasforma un Segment del YAML in un clip MoviePy pronto per il montaggio.
+
+    `target` e' la durata che il segmento deve avere sul montaggio: la passa il
+    chiamante quando il progetto dichiara gli istanti con `at`, perche' in quel
+    caso la durata non sta nel segmento - viene da quando entra il successivo.
+    """
+    size = project.output.size
+    fit_mode = seg.fit or project.defaults.fit
+
+    if seg.type == "video":
+        path = project.resolve(seg.src)
+        if not path.exists():
+            raise FileNotFoundError(f"Sorgente video non trovata: {path}")
+        clip = VideoFileClip(str(path))
+        _OPEN_CLIPS.append(clip)
+
+        # Quanto sorgente serve: fino a `end` se c'e', altrimenti quanto chiede
+        # il posto sul montaggio. A velocita' diversa da 1 ne serve di piu' (o
+        # di meno): due secondi di montaggio a 2x mangiano quattro secondi di
+        # girato.
+        source_start = seg.start or 0
+        if seg.end is not None:
+            needed = seg.end - source_start
+        elif target is not None:
+            needed = target * seg.speed
+        else:
+            needed = None                       # fino alla fine del file
+
+        if needed is None:
+            if seg.start is not None:
+                clip = clip.subclipped(source_start)
+        elif seg.loop and clip.duration - source_start < needed - 1e-3:
+            # Un sorgente piu' corto del suo posto ricomincia da capo invece di
+            # rallentare: e' quello che fa una GIF, e per un gesto breve che si
+            # ripete (un'onda, un lampeggio) e' anche la cosa naturale.
+            clip = clip.subclipped(source_start).with_effects([vfx.Loop(duration=needed)])
+        else:
+            clip = clip.subclipped(source_start, source_start + needed)
+
+        if seg.speed != 1.0:
+            clip = clip.with_effects([vfx.MultiplySpeed(seg.speed)])
+
+        if seg.mute:
+            clip = clip.without_audio()
+
+    elif seg.type == "image":
+        path = project.resolve(seg.src)
+        if not path.exists():
+            raise FileNotFoundError(f"Immagine non trovata: {path}")
+        duration = target or seg.duration or project.defaults.image_duration
+
+        if seg.motion:
+            # Il movimento adatta l'immagine da solo: deve ingrandirla oltre il
+            # canvas per avere spazio su cui muoversi, quindi salta fit_clip e
+            # place_on_canvas e restituisce gia' un clip delle misure giuste.
+            import numpy as np
+
+            clip = ImageClip(np.asarray(load_still(path).convert("RGB"))).with_duration(duration)
+            ctx = MotionContext(amount=seg.amount, size=size, duration=duration)
+            return motion.get(seg.motion).apply(clip, ctx)
+
+        frame = still_on_canvas(path, size, fit_mode, project.output.background)
+        return ImageClip(frame).with_duration(duration)
+
+    elif seg.type == "color":
+        clip = ColorClip(size=size, color=seg.color, duration=target or seg.duration)
+
+    else:  # pragma: no cover - gia' validato in models.py
+        raise ValueError(f"Tipo di segmento sconosciuto: {seg.type}")
+
+    clip = fit_clip(clip, size, fit_mode)
+    clip = place_on_canvas(clip, size, project.output.background)
+    return clip
+
+
+# --------------------------------------------------------------------------
+# Montaggio con transizioni
+# --------------------------------------------------------------------------
+
+def concat_with_transitions(clips: list, requests: list[TransitionRequest],
+                            size: tuple[int, int],
+                            placements: list | None = None):
+    """
+    Concatena i clip applicando la transizione in ENTRATA di ciascuno.
+
+    `requests[i]` descrive come entra il clip i-esimo (requests[0] viene
+    ignorato: il primo clip non ha nulla che lo preceda).
+
+    Il trucco chiave delle transizioni "con sovrapposizione": il clip parte a
+    `fine del precedente - durata`, cosi' i due coesistono nel tempo. Senza
+    quella sovrapposizione una dissolvenza incrociata dissolverebbe dal nero.
+    Le transizioni senza sovrapposizione (stacco, dissolvenza al nero) lasciano
+    i clip in fila e si consumano al loro interno.
+
+    `placements` arriva gia' calcolato dal montaggio a istanti, dove le
+    posizioni non sono la somma delle durate ma i tagli dichiarati con `at`
+    (vedi timeline.plan_anchored). Negli altri casi le calcola qui.
+
+    Chi applica l'effetto e' il registry in transitions.py: questa funzione non
+    sa cosa sia un wipe, sa solo che qualcuno gli restituira' due clip modificati.
+    """
+    if not clips:
+        raise ValueError("Nessun clip da concatenare")
+
+    durations = [clip.duration for clip in clips]
+    specs = [transitions.get(req.type) for req in requests]
+
+    if placements is None:
+        # La durata effettiva vale per tutti i tipi (anche quelli che non
+        # sovrappongono: una dissolvenza al nero piu' lunga del clip non ha
+        # senso), mentre la sovrapposizione la chiedono solo i tipi che ne hanno
+        # bisogno.
+        effective = effective_overlaps([r.duration for r in requests], durations)
+        overlaps = [e if specs[i].overlaps else 0.0 for i, e in enumerate(effective)]
+        # Il calcolo di inizio/fine sta in timeline.py, che non dipende da
+        # MoviePy: cosi' `render --check` mostra le stesse cifre senza importare
+        # nulla.
+        placements = plan(durations, overlaps)
+    else:
+        # A istanti la riduzione l'ha gia' fatta plan_anchored, misurandola sul
+        # tempo che ogni segmento possiede fra un taglio e il successivo: qui si
+        # rilegge da li' invece di rifarla sulle durate dei clip, che ormai
+        # contengono anche la sovrapposizione.
+        effective = [p.overlap for p in placements]
+        for i, spec in enumerate(specs):
+            if not spec.overlaps:
+                effective[i] = clamp_overlap(requests[i].duration,
+                                             durations[i - 1] if i else 0.0, durations[i])
+
+    placed: list = []
+    for i, (clip, placement) in enumerate(zip(clips, placements, strict=True)):
+        current = clip.with_start(placement.start)
+
+        if i > 0 and effective[i] > 0:
+            ctx = TransitionContext(
+                duration=effective[i], direction=requests[i].direction, size=size
+            )
+            previous, current = specs[i].apply(placed[-1], current, ctx)
+            placed[-1] = previous
+
+        placed.append(current)
+
+    montage = CompositeVideoClip(placed, size=size).with_duration(total_duration(placements))
+    return montage
+
+
+# --------------------------------------------------------------------------
+# Overlay
+# --------------------------------------------------------------------------
+
+def make_text_clip(text: str, style: TextStyle, canvas_width: int, duration: float,
+                   root: Path | None = None):
+    """
+    Un clip di testo: font, contorno, sfondo, a capo, allineamento.
+
+    Il disegno lo fa text.py con Pillow, non il TextClip di MoviePy: il perche'
+    e' scritto la'. Qui l'immagine RGBA diventa un clip, e il suo canale alfa
+    la maschera che lo rende trasparente attorno alle lettere.
+    """
+    rgba = render_text(text, style, canvas_width, root)
+    return ImageClip(rgba, transparent=True).with_duration(duration)
+
+
+def build_overlay(ov: Overlay, project: Project, video_duration: float):
+    """Costruisce un singolo overlay (immagine o testo) da sovrapporre al montaggio."""
+    duration = ov.duration if ov.duration is not None else max(video_duration - ov.start, 0.1)
+
+    if ov.type == "image":
+        path = project.resolve(ov.src)
+        if not path.exists():
+            raise FileNotFoundError(f"Overlay non trovato: {path}")
+        clip = ImageClip(str(path)).with_duration(duration)
+        if ov.width or ov.height:
+            if ov.width and ov.height:
+                clip = clip.resized((ov.width, ov.height))
+            elif ov.width:
+                clip = clip.resized(width=ov.width)
+            else:
+                clip = clip.resized(height=ov.height)
+    else:
+        clip = make_text_clip(ov.text, ov.style, project.output.size[0], duration,
+                              root=project.root)
+
+    clip = clip.with_start(ov.start).with_position(place(ov.position, clip.size,
+                                                         project.output.size))
+
+    if ov.opacity < 1.0:
+        clip = clip.with_opacity(ov.opacity)
+
+    if ov.fade > 0:
+        if clip.mask is None:
+            clip = clip.with_mask()
+        clip = clip.with_effects([vfx.CrossFadeIn(ov.fade), vfx.CrossFadeOut(ov.fade)])
+
+    return clip
+
+
+# --------------------------------------------------------------------------
+# Audio
+# --------------------------------------------------------------------------
+
+def build_audio(spec: AudioSpec, project: Project, video_duration: float):
+    """Prepara la traccia audio aggiuntiva, tagliata alla durata del video."""
+    path = project.resolve(spec.src)
+    if not path.exists():
+        raise FileNotFoundError(f"Traccia audio non trovata: {path}")
+
+    audio = AudioFileClip(str(path))
+    _OPEN_CLIPS.append(audio)
+
+    usable = min(audio.duration, video_duration - spec.start)
+    if usable <= 0:
+        raise ValueError("La traccia audio inizia dopo la fine del video")
+    if audio.duration < video_duration - spec.start:
+        log.warning(
+            "La traccia audio (%.1fs) e' piu' corta del video (%.1fs): "
+            "il finale restera' senza musica.",
+            audio.duration, video_duration,
+        )
+
+    audio = audio.subclipped(0, usable)
+
+    effects = []
+    if spec.volume != 1.0:
+        effects.append(afx.MultiplyVolume(spec.volume))
+    if spec.fade_in > 0:
+        effects.append(afx.AudioFadeIn(spec.fade_in))
+    if spec.fade_out > 0:
+        effects.append(afx.AudioFadeOut(spec.fade_out))
+    if effects:
+        audio = audio.with_effects(effects)
+
+    if spec.start > 0:
+        audio = audio.with_start(spec.start)
+
+    return audio
+
+
+# --------------------------------------------------------------------------
+# Entry point
+# --------------------------------------------------------------------------
+
+def build(project: Project):
+    """Costruisce il clip finale, pronto per write_videofile()."""
+    size = project.output.size
+
+    # La transizione dichiarata sul segmento vince sul default globale.
+    requests = [seg.transition_request(project.defaults) for seg in project.timeline]
+
+    # Se il progetto dichiara gli istanti (`at`), le durate si ricavano da quelli:
+    # ogni segmento finisce quando comincia il successivo.
+    project.validate_positions()
+    positions = project.cut_positions()
+    targets: list[float | None] = [None] * len(project.timeline)
+    placements = None
+
+    if positions is not None:
+        ultimo = project.timeline[-1]
+        coda = ultimo.timeline_duration(project.defaults)
+        if coda is None:
+            coda = (ultimo.end or 0) - (ultimo.start or 0)
+        # Le posizioni si calcolano PRIMA di costruire i clip, non dopo: con una
+        # transizione sovrapposta il segmento entra in anticipo, e quindi di
+        # sorgente ne serve un pezzo piu' lungo del tempo che possiede. La
+        # riduzione delle sovrapposizioni la fa plan_anchored, che e' anche
+        # l'unico posto in cui viene fatta.
+        sovrapposte = [
+            request.duration if transitions.get(request.type).overlaps else 0.0
+            for request in requests
+        ]
+        placements = plan_anchored(positions, coda, sovrapposte)
+        targets = [p.duration for p in placements]
+        log.info("Montaggio a istanti: %d tagli dichiarati", len(positions))
+
+    log.info("Costruzione di %d segmenti...", len(project.timeline))
+    clips = []
+    for i, seg in enumerate(project.timeline):
+        clips.append(build_segment(seg, project, target=targets[i]))
+        log.info("  [%d] %s %s (%.2fs)", i, seg.type, seg.label or seg.src or "",
+                 clips[-1].duration)
+
+    video = concat_with_transitions(clips, requests, size, placements=placements)
+    log.info("Durata del montaggio: %.2fs", video.duration)
+
+    # Gli overlay vanno sopra il montaggio, nell'ordine in cui sono scritti: il
+    # primo della lista finisce sotto, l'ultimo sopra a tutti.
+    layers = []
+    if project.overlays:
+        log.info("Applicazione di %d overlay...", len(project.overlays))
+        layers += [build_overlay(ov, project, video.duration) for ov in project.overlays]
+
+    if layers:
+        video = CompositeVideoClip([video, *layers], size=size).with_duration(video.duration)
+
+    # Le dissolvenze di apertura e chiusura vanno applicate DOPO gli overlay:
+    # un testo che resta acceso mentre tutto il resto si spegne nel nero
+    # sembrerebbe un errore.
+    fades = []
+    if project.fade_in > 0:
+        fades.append(vfx.FadeIn(min(project.fade_in, video.duration)))
+    if project.fade_out > 0:
+        fades.append(vfx.FadeOut(min(project.fade_out, video.duration)))
+    if fades:
+        video = video.with_effects(fades)
+
+    if project.audio is not None:
+        from moviepy import CompositeAudioClip
+
+        music = build_audio(project.audio, project, video.duration)
+        if project.audio.replace or video.audio is None:
+            video = video.with_audio(music)
+        else:
+            video = video.with_audio(CompositeAudioClip([video.audio, music]))
+
+    return video
+
+
+def discard_partial(target: Path) -> list[Path]:
+    """
+    Cancella il file interrotto e i temporanei di MoviePy.
+
+    Un mp4 troncato a meta' export non e' riproducibile ma esiste: lasciarlo
+    li' significa ritrovarselo domani e credere che il render fosse riuscito.
+    MoviePy scrive anche l'audio in un file `...TEMP_MPY_wvf_snd.*` accanto
+    alla destinazione, e non lo ripulisce se l'export non arriva in fondo.
+    """
+    removed = []
+    candidates = [target, *target.parent.glob(f"{target.stem}TEMP_MPY_*")]
+    for path in candidates:
+        try:
+            if path.exists():
+                path.unlink()
+                removed.append(path)
+        except OSError:
+            log.warning("Non sono riuscito a rimuovere %s", path)
+    return removed
+
+
+def render(project: Project, dry_run: bool = False, preview: bool = False) -> Path | None:
+    """Costruisce ed esporta il video. Restituisce il percorso del file prodotto."""
+    out = project.output
+
+    if preview:
+        # Anteprima veloce: meta' risoluzione, encoding rapidissimo, qualita' bassa.
+        # Serve per iterare sul montaggio senza aspettare l'export finale.
+        # Si riscala tutto il progetto, non solo il canvas: altrimenti gli
+        # overlay posizionati in pixel finirebbero fuori dal quadro.
+        project.scale(0.5)
+        out.fps = min(out.fps, 24)
+        out.preset = "ultrafast"
+        out.crf = 30
+        out.path = out.path.with_name(out.path.stem + "_preview" + out.path.suffix)
+
+    video = build(project)
+
+    if dry_run:
+        log.info("dry-run: nessun file scritto. Durata finale %.2fs", video.duration)
+        close_all()
+        return None
+
+    target = project.resolve(out.path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    log.info("Export verso %s (%dx%d @ %dfps, crf=%d, preset=%s)",
+             target, out.size[0], out.size[1], out.fps, out.crf, out.preset)
+
+    ffmpeg_params = ["-crf", str(out.crf), "-pix_fmt", "yuv420p"]
+
+    # logger=progress al posto del tqdm di MoviePy: stessa informazione,
+    # una riga sola, con la stima del tempo residuo (vedi progress.py).
+    progress = RenderProgress()
+    started = time.monotonic()
+
+    try:
+        video.write_videofile(
+            str(target),
+            fps=out.fps,
+            codec=out.codec,
+            audio_codec=out.audio_codec,
+            preset=out.preset,
+            threads=out.threads,
+            ffmpeg_params=ffmpeg_params,
+            logger=progress,
+        )
+    except KeyboardInterrupt:
+        progress.close_line()
+        close_all()   # prima i processi ffmpeg, poi i file: altrimenti restano aperti
+        for path in discard_partial(target):
+            log.warning("Interrotto: rimosso il file parziale %s", path.name)
+        raise
+    finally:
+        progress.close_line()
+
+    log.info("Export completato in %s", format_duration(time.monotonic() - started))
+    close_all()
+    return target
+
+
+def close_all() -> None:
+    """Chiude i file sorgente aperti (evita processi ffmpeg zombie)."""
+    while _OPEN_CLIPS:
+        clip = _OPEN_CLIPS.pop()
+        try:
+            clip.close()
+        except Exception:
+            pass

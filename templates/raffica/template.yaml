@@ -1,0 +1,91 @@
+# ---------------------------------------------------------------------------
+# TEMPLATE AUDIO: raffica
+#
+# Un montaggio riutilizzabile. La musica, gli istanti dei tagli e lo stile
+# sono fissi; i media e i testi no: quelli li mette ogni edit.
+#
+#   vedit new edits/mio-video --template templates/raffica
+#
+# `at` e' l'istante in cui uno slot entra in scena, misurato sulla traccia
+# audio qui sotto. Uno slot finisce quando comincia il successivo, e l'ultimo
+# finisce con la traccia: le durate non si scrivono, si deducono.
+# ---------------------------------------------------------------------------
+
+name: raffica
+duration: 18.1333         # quanto dura il montaggio completo
+
+audio:
+  src: audio.m4a          # la traccia, che vive dentro questa cartella
+  bpm: 151.5              # un battito ogni 0.396s
+  offset: 0.1             # dove cade il primo battito
+  volume: 1               # 1 = com'e', 0.5 = a meta'
+  fade_out: 0             # dissolvenza audio in chiusura
+
+format:
+  size: [720, 1280]       # si puo' cambiare quando lo applichi: --size 1080x1920
+  fps: 30
+
+# Come entrano i media: vale per tutti gli slot.
+style:
+  fit: contain            # contain = interi, con le bande; cover = a tutto schermo, tagliando i bordi
+  background: [0, 0, 0]   # colore delle bande
+  fade_in: 0              # secondi di dissolvenza dal nero all'inizio
+  fade_out: 1.97          # secondi di dissolvenza al nero alla fine
+
+# Lo stile dei testi che metterai negli edit. Ogni testo puo' cambiarlo.
+text:
+  font: DejaVu Sans Bold, Arial Bold, arialbd
+  font_size: 54
+  color: white
+  stroke_color: black
+  stroke_width: 4
+  max_width: 0.84
+  align: center
+
+source:                 # da dove e' stato estratto: solo memoria
+  file: edit.mp4           # un montaggio a tempo di musica su TikTok
+  duration: 18.13
+  extracted: 2026-10-21
+
+# ---------------------------------------------------------------------------
+# SLOT: 28 posti da riempire, in quest'ordine.
+#
+# hint dice cosa c'era in quel posto nel video di riferimento: un video
+# (contenuto in movimento) o un'immagine ferma. E' un consiglio, non un
+# obbligo. motion vale solo se in quello slot finisce una FOTO.
+# ---------------------------------------------------------------------------
+slots:
+  - at: 0.0               #  1)  dura 4.06s, 10.25 battiti
+    hint: video
+    label: apertura
+  - at: 4.06              #  2)  dura 0.59s, 1.50 battiti
+  - at: 4.654             #  3)  dura 0.40s, 1.00 battiti
+  - at: 5.051             #  4)  dura 0.40s, 1.00 battiti
+  - at: 5.447             #  5)  dura 0.40s, 1.00 battiti
+  - at: 5.843             #  6)  dura 0.40s, 1.00 battiti
+  - at: 6.239             #  7)  dura 0.40s, 1.00 battiti
+  - at: 6.635             #  8)  dura 0.50s, 1.26 battiti
+  - at: 7.133             #  9)  dura 0.43s, 1.09 battiti
+  - at: 7.567             # 10)  dura 0.26s, 0.65 battiti
+  - at: 7.823             # 11)  dura 0.40s, 1.00 battiti
+  - at: 8.219             # 12)  dura 0.40s, 1.00 battiti
+  - at: 8.615             # 13)  dura 0.40s, 1.00 battiti
+  - at: 9.011             # 14)  dura 0.40s, 1.00 battiti
+  - at: 9.407             # 15)  dura 0.40s, 1.00 battiti
+  - at: 9.803             # 16)  dura 0.40s, 1.00 battiti
+  - at: 10.199            # 17)  dura 0.30s, 0.76 battiti
+  - at: 10.5              # 18)  dura 0.49s, 1.24 battiti
+  - at: 10.991            # 19)  dura 0.40s, 1.00 battiti
+  - at: 11.387            # 20)  dura 0.40s, 1.00 battiti
+  - at: 11.783            # 21)  dura 1.98s, 5.00 battiti
+    hint: image
+    label: pausa
+  - at: 13.763            # 22)  dura 0.40s, 1.00 battiti
+  - at: 14.159            # 23)  dura 0.40s, 1.00 battiti
+  - at: 14.555            # 24)  dura 0.40s, 1.00 battiti
+  - at: 14.951            # 25)  dura 0.40s, 1.00 battiti
+  - at: 15.348            # 26)  dura 0.40s, 1.00 battiti
+  - at: 15.744            # 27)  dura 0.40s, 1.00 battiti
+  - at: 16.14             # 28)  dura 1.99s, 5.03 battiti
+    hint: image
+    label: chiusura

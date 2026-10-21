@@ -17,10 +17,6 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        # Il progetto vive in una sottocartella del repo.
-        working-directory: video-toolkit
 
     strategy:
       fail-fast: false
@@ -57,27 +53,10 @@ jobs:
       - name: Test
         run: python -m pytest -q
 
-      - name: Genera il materiale di prova
-        # Gli stessi comandi documentati in assets/README.md: se cambiano e
-        # smettono di funzionare, la CI se ne accorge.
-        run: |
-          ffmpeg -v error -f lavfi -i testsrc=size=1280x720:rate=30:duration=60 \
-                 -f lavfi -i sine=frequency=440:duration=60 \
-                 -c:v libx264 -pix_fmt yuv420p -c:a aac assets/input.mp4
-          ffmpeg -v error -f lavfi -i testsrc=size=1080x1350 -frames:v 1 assets/foto1.jpg
-          ffmpeg -v error -f lavfi -i color=c=blue@0.8:size=400x120,format=rgba \
-                 -frames:v 1 assets/logo.png
-
-      - name: Riepilogo del progetto demo
-        # Usa il comando `vedit` invece di `python -m vedit`: cosi' si verifica
-        # anche che l'entry point dichiarato in pyproject funzioni davvero.
-        run: vedit render projects/demo/timeline.yaml --check
-
-      - name: Anteprima del progetto demo
-        run: vedit render projects/demo/timeline.yaml --preview
-
       - name: Il giro dei template, da capo a fondo
         # extract -> apply -> verifica che i tagli cadano dove dice il template.
+        # Usa il comando `vedit` invece di `python -m vedit`: cosi' si verifica
+        # anche che l'entry point dichiarato in pyproject funzioni davvero.
         # E' la promessa su cui si regge tutta la funzionalita': se salta, un
         # template non vale niente, perche' il suo unico valore e' la sincronia.
         run: |
@@ -124,20 +103,42 @@ jobs:
               clip.close()
           PY
 
-      - name: Verifica il file prodotto
-        # Un export puo' uscire con codice 0 e produrre un video sbagliato:
-        # si controllano durata, dimensioni e che i fotogrammi non siano neri.
+      - name: Un edit con testi e una GIF, da capo a fondo
+        # new -> edit.yaml con un testo -> --check -> render -> verifica che i
+        # tagli cadano sugli istanti e che il testo si veda dove deve.
         run: |
+          ffmpeg -v error -f lavfi -i "testsrc2=size=120x120:rate=10:duration=0.6" /tmp/media_onda.gif
+          vedit new /tmp/edit --template /tmp/tpl /tmp/media_green.mp4 /tmp/media_onda.gif \
+                    /tmp/media_cyan.mp4
           python - <<'PY'
+          import yaml
+          path = "/tmp/edit/edit.yaml"
+          edit = yaml.safe_load(open(path))
+          edit["texts"] = [{"text": "CIAO", "slot": 3, "position": "center",
+                            "color": "white", "stroke_color": "black", "stroke_width": 2}]
+          yaml.safe_dump(edit, open(path, "w"))
+          PY
+          vedit render /tmp/edit --check
+          vedit render /tmp/edit -o /tmp/edit/output/edit.mp4
+
+          python - <<'PY'
+          import numpy as np, yaml
           from moviepy import VideoFileClip
 
-          clip = VideoFileClip("output/demo_preview.mp4")
+          template = yaml.safe_load(open("/tmp/tpl/template.yaml"))
+          istanti = [s["at"] for s in template["slots"]]
+          clip = VideoFileClip("/tmp/edit/output/edit.mp4")
           try:
-              assert abs(clip.duration - 17.3) < 0.2, f"durata inattesa: {clip.duration}"
-              assert tuple(clip.size) == (960, 540), f"dimensioni inattese: {clip.size}"
-              luminosita = clip.get_frame(5.0).mean()
-              assert luminosita > 5, f"fotogramma nero a 5s: {luminosita}"
-              print(f"OK: {clip.duration}s, {clip.size}, luminosita' media {luminosita:.1f}")
+              for at in istanti[1:]:
+                  prima = clip.get_frame(at - 0.05).mean(axis=(0, 1))
+                  dopo = clip.get_frame(at + 0.05).mean(axis=(0, 1))
+                  assert np.abs(prima - dopo).max() > 20, f"nessun taglio a {at}"
+              # Il testo sta al centro del posto 3, che e' ciano: li' i pixel
+              # bianchi possono venire solo dalle lettere.
+              meta = (istanti[2] + template["duration"]) / 2
+              centro = clip.get_frame(meta)[70:110, 120:200]
+              assert (centro.min(axis=2) > 230).sum() > 30, "il testo non si vede"
+              print("OK: tagli sugli istanti e testo visibile")
           finally:
               clip.close()
           PY

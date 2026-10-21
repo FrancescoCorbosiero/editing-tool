@@ -1,0 +1,48 @@
+# I media non si versionano: sono pesanti e cambiano a ogni video.
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.gif
+*.mp3
+*.m4a
+*.wav
+*.jpg
+*.jpeg
+*.png
+*.webp
+!docs/**/*.png
+
+# I render
+output/*
+!output/.gitkeep
+
+# Ogni edit in edits/ si porta dietro i suoi media e i suoi render: l'edit.yaml
+# si versiona, il resto no.
+edits/*/media/*
+!edits/*/media/.gitkeep
+edits/*/output/*
+!edits/*/output/.gitkeep
+
+# I template sono l'eccezione alla regola, e lo sono per costruzione: un
+# template audio SENZA la sua traccia non e' applicabile, perche' gli istanti
+# dei tagli sono i battiti di quella musica e da soli non vogliono dire niente.
+# La traccia e' parte del template, non un allegato. Questa regola sta in fondo
+# di proposito: in un .gitignore vince l'ultima che corrisponde.
+!templates/*/audio.*
+!templates/*/template.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Sistema
+.DS_Store
+Thumbs.db

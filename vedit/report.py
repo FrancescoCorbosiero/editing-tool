@@ -1,0 +1,438 @@
+"""
+Riepilogo di un progetto senza renderizzarlo (`render --check`).
+
+Risponde a tre domande che ci si pone continuamente mentre si monta:
+  - quanto dura il montaggio, e dove cade ogni segmento?
+  - i tagli che ho scritto stanno dentro la durata dei file sorgente?
+  - le sorgenti sono coerenti fra loro (stessa risoluzione, stesso fps)?
+
+Non importa MoviePy: legge i metadati con ffprobe, che costa millisecondi
+contro i secondi di un import di MoviePy.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import transitions
+from .ffmpeg_tools import FFmpegError, probe
+from .models import Project, Segment
+from .timeline import (
+    Placement,
+    clamp_overlap,
+    effective_overlaps,
+    plan,
+    plan_anchored,
+)
+from .transitions import TransitionRequest
+
+
+@dataclass
+class SegmentRow:
+    """Una riga del riepilogo: un segmento con la sua posizione calcolata."""
+
+    index: int
+    kind: str
+    label: str
+    detail: str
+    placement: Placement
+    transition: TransitionRequest | None = None   # None sul primo segmento
+
+    def transition_label(self) -> str:
+        """Come si legge la transizione in entrata nel riepilogo."""
+        if self.transition is None:
+            return "-"
+        if self.transition.type == "cut" or self.transition.duration <= 0:
+            return "cut"
+        spec = transitions.get(self.transition.type)
+        text = f"{self.transition.type} {self.transition.duration:.2f}s"
+        if spec.directional:
+            text += f" da {self.transition.direction}"
+        return text
+
+
+@dataclass
+class OverlayRow:
+    """Una riga del riepilogo degli overlay: un testo o un'immagine sopra il montaggio."""
+
+    start: float
+    end: float
+    position: str
+    detail: str
+
+
+@dataclass
+class Report:
+    project_path: Path
+    output_path: Path
+    size: tuple[int, int]
+    fps: int
+    rows: list[SegmentRow] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    overlays: list[OverlayRow] = field(default_factory=list)
+    fade_in: float = 0.0
+    fade_out: float = 0.0
+
+    @property
+    def duration(self) -> float:
+        return self.rows[-1].placement.end if self.rows else 0.0
+
+
+def format_time(seconds: float) -> str:
+    """Secondi -> `m:ss.cc`, il formato con cui si ragiona su una timeline."""
+    if seconds < 0:
+        seconds = 0.0
+    minutes, rest = divmod(seconds, 60)
+    hours, minutes = divmod(int(minutes), 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{rest:05.2f}"
+    return f"{minutes}:{rest:05.2f}"
+
+
+def _probe_cached(path: Path, cache: dict[Path, dict | None]) -> dict | None:
+    """ffprobe su un file, una volta sola anche se compare in piu' segmenti."""
+    if path not in cache:
+        try:
+            cache[path] = probe(path)
+        except (FFmpegError, FileNotFoundError):
+            cache[path] = None
+    return cache[path]
+
+
+def _segment_detail(seg: Segment, info: dict | None, duration: float | None = None) -> str:
+    """Colonna di destra: sorgente e punti di taglio, se ci sono."""
+    if seg.type == "color":
+        return f"colore rgb{tuple(seg.color)}"
+
+    parts = [Path(seg.src).name] if seg.src else []
+    if seg.motion:
+        parts.append(f"{seg.motion} {seg.amount * 100:g}%")
+    if seg.type == "video":
+        if seg.end is not None:
+            parts.append(f"[{seg.start or 0:g} -> {seg.end:g}]")
+        elif duration is not None:
+            # Con `at` il punto di uscita non e' scritto: lo decide il taglio
+            # successivo. Mostrarlo calcolato evita di far credere che il
+            # segmento arrivi fino alla fine del file.
+            uscita = (seg.start or 0) + duration * seg.speed
+            parts.append(f"[{seg.start or 0:g} -> {uscita:.2f}]")
+        elif seg.start is not None:
+            parts.append(f"[{seg.start:g} -> fine]")
+        if seg.speed != 1.0:
+            parts.append(f"x{seg.speed:g}")
+        if seg.loop:
+            parts.append("in loop")
+        if seg.mute:
+            parts.append("muto")
+    if info and info.get("width"):
+        parts.append(f"{info['width']}x{info['height']}")
+    return "  ".join(parts)
+
+
+def analyze(project: Project, project_path: Path | str = "") -> Report:
+    """Costruisce il riepilogo: durate, posizioni, incoerenze fra le sorgenti."""
+    report = Report(
+        project_path=Path(project_path),
+        output_path=project.resolve(project.output.path),
+        size=project.output.size,
+        fps=project.output.fps,
+    )
+
+    cache: dict[Path, dict | None] = {}
+    kinds: dict[Path, str] = {}   # video o image: un jpeg non ha un vero frame rate
+    durations: list[float] = []
+    requests: list[TransitionRequest] = []
+    infos: list[dict | None] = []
+
+    ingranditi: set[Path] = set()
+    for i, seg in enumerate(project.timeline):
+        info = None
+        if seg.src is not None:
+            source = project.resolve(seg.src)
+            # Una GIF ha per natura risoluzione e frame rate suoi: confrontarla
+            # con le riprese produrrebbe solo avvisi da ignorare.
+            kinds[source] = "gif" if source.suffix.lower() == ".gif" else seg.type
+            info = _probe_cached(source, cache)
+            _check_upscale(report, project, seg, source, info, ingranditi)
+        infos.append(info)
+
+        source_duration = info["duration"] if info else None
+        duration = seg.timeline_duration(project.defaults, source_duration)
+        if duration is None:
+            # Succede solo se ffprobe non e' riuscito a leggere il file:
+            # meglio una durata finta che un riepilogo interrotto a meta'.
+            report.warnings.append(
+                f"timeline[{i}]: durata non determinabile (ffprobe non ha letto il file)"
+            )
+            duration = 0.0
+        durations.append(duration)
+        requests.append(seg.transition_request(project.defaults))
+
+        _check_cuts(report, i, seg, info)
+
+        if seg.motion and seg.fit:
+            report.warnings.append(
+                f"timeline[{i}]: fit '{seg.fit}' viene ignorato perche' c'e' motion "
+                f"'{seg.motion}' (il movimento riempie sempre il canvas, altrimenti "
+                "muoverebbe anche le bande nere)"
+            )
+
+    # Stesso calcolo del builder: la sovrapposizione la chiedono solo i tipi che
+    # ne hanno bisogno (vedi transitions.py).
+    richieste = [r.duration for r in requests]
+    positions = project.cut_positions()
+
+    if positions is not None:
+        # Montaggio a istanti: le durate vengono dai tagli dichiarati, non dai
+        # segmenti, e il segmento entra in anticipo senza spostare il taglio.
+        # Stessa funzione del builder, altrimenti il riepilogo mentirebbe.
+        sovrapposte = [
+            valore if transitions.get(requests[i].type).overlaps else 0.0
+            for i, valore in enumerate(richieste)
+        ]
+        placements = plan_anchored(positions, durations[-1] if durations else 0.0, sovrapposte)
+        durations = [p.duration for p in placements]
+        # La riduzione l'ha decisa plan_anchored: si rilegge da li'.
+        effective = [p.overlap for p in placements]
+        for i, request in enumerate(requests):
+            if not transitions.get(request.type).overlaps:
+                effective[i] = 0.0 if i == 0 else clamp_overlap(
+                    request.duration, durations[i - 1], durations[i]
+                )
+    else:
+        effective = effective_overlaps(richieste, durations)
+        overlaps = [
+            valore if transitions.get(requests[i].type).overlaps else 0.0
+            for i, valore in enumerate(effective)
+        ]
+        placements = plan(durations, overlaps)
+
+    rows = zip(project.timeline, placements, infos, strict=True)
+    for i, (seg, place, info) in enumerate(rows):
+        applied = None if i == 0 else TransitionRequest(
+            duration=effective[i], type=requests[i].type, direction=requests[i].direction
+        )
+        report.rows.append(SegmentRow(
+            index=i,
+            kind=seg.type,
+            label=seg.label,
+            detail=_segment_detail(seg, info, durations[i]),
+            placement=place,
+            transition=applied,
+        ))
+        if i > 0 and effective[i] < requests[i].duration - 1e-6:
+            report.warnings.append(
+                f"timeline[{i}]: transizione ridotta da {requests[i].duration:g}s a "
+                f"{effective[i]:.2f}s (non puo' superare meta' dei clip coinvolti)"
+            )
+
+    _check_sources_consistency(report, project, cache, kinds)
+    _check_audio(report, project, cache)
+    _check_fades(report, project)
+    _list_overlays(report, project)
+    return report
+
+
+def _position_label(position) -> str:
+    """Come si legge una posizione nel riepilogo."""
+    if isinstance(position, dict):
+        return f"{position['x']:g},{position['y']:g}"
+    if isinstance(position, (list, tuple)):
+        return ",".join(str(p) for p in position)
+    return str(position)
+
+
+def _list_overlays(report: Report, project: Project) -> None:
+    """Gli overlay con i loro tempi, e quelli che non si vedrebbero."""
+    for i, ov in enumerate(project.overlays):
+        fine = report.duration if ov.duration is None else ov.start + ov.duration
+        if ov.type == "text":
+            dettaglio = ov.text.replace("\n", " / ")
+        else:
+            dettaglio = f"immagine {Path(ov.src).name}"
+        report.overlays.append(OverlayRow(
+            start=ov.start, end=min(fine, report.duration),
+            position=_position_label(ov.position), detail=dettaglio,
+        ))
+        if ov.start >= report.duration:
+            report.warnings.append(
+                f"overlays[{i}]: comincia a {ov.start:g}s, dopo la fine del montaggio "
+                f"({report.duration:.2f}s): non si vedra'"
+            )
+
+
+def _check_fades(report: Report, project: Project) -> None:
+    """Le dissolvenze di apertura e chiusura devono stare dentro il montaggio."""
+    report.fade_in, report.fade_out = project.fade_in, project.fade_out
+    if project.fade_in + project.fade_out > report.duration + 1e-6:
+        report.warnings.append(
+            f"le dissolvenze dal nero ({project.fade_in:g}s) e al nero "
+            f"({project.fade_out:g}s) durano piu' del montaggio ({report.duration:.2f}s): "
+            "si sovrapporranno e il video non arrivera' mai alla luce piena"
+        )
+
+
+def _check_upscale(report: Report, project: Project, seg: Segment, source: Path,
+                   info: dict | None, gia_detti: set[Path]) -> None:
+    """
+    Avvisa se un sorgente verra' ingrandito, cioe' mostrato meno nitido.
+
+    Quanto si ingrandisce dipende da come entra nel quadro: con `contain`
+    un'immagine larga quanto il canvas non si ingrandisce affatto anche se e'
+    meno alta, con `cover` deve riempire anche l'altra dimensione. Sotto il 10%
+    non se ne accorge nessuno.
+    """
+    if not info or not info.get("width") or source in gia_detti:
+        return
+    larghezza, altezza = project.output.size
+    rapporti = (larghezza / info["width"], altezza / info["height"])
+    fit = "cover" if seg.motion else (seg.fit or project.defaults.fit)
+    scala = min(rapporti) if fit == "contain" else max(rapporti)
+    if scala > 1.1:
+        gia_detti.add(source)
+        report.warnings.append(
+            f"{source.name}: {info['width']}x{info['height']} verra' ingrandito "
+            f"{scala:.1f} volte per entrare nel canvas {larghezza}x{altezza} "
+            f"({fit}): apparira' meno nitido"
+        )
+
+
+def _check_cuts(report: Report, index: int, seg: Segment, info: dict | None) -> None:
+    """Verifica che i punti di taglio stiano dentro la durata del sorgente."""
+    if seg.type != "video" or not info:
+        return
+    source_duration = info["duration"]
+    if seg.start is not None and seg.start >= source_duration:
+        report.warnings.append(
+            f"timeline[{index}]: start={seg.start:g}s ma il file dura "
+            f"{source_duration:.2f}s: il segmento risultera' vuoto"
+        )
+    elif seg.end is not None and seg.end > source_duration + 0.05 and not seg.loop:
+        report.warnings.append(
+            f"timeline[{index}]: end={seg.end:g}s oltre la fine del file "
+            f"({source_duration:.2f}s): verra' troncato"
+        )
+
+
+def _check_sources_consistency(
+    report: Report, project: Project, cache: dict, kinds: dict[Path, str]
+) -> None:
+    """
+    Avvisa se le sorgenti non parlano la stessa lingua.
+
+    Mescolare risoluzioni o frame rate diversi non e' un errore - il canvas di
+    output uniforma tutto - ma e' la causa piu' comune di risultati "strani":
+    un 25 fps dentro un montaggio a 30 fps viene ricampionato e i movimenti
+    possono risultare meno fluidi.
+
+    Il confronto riguarda solo i VIDEO. Le foto hanno per definizione
+    risoluzioni e proporzioni diverse fra loro, e il frame rate che ffprobe
+    riporta per un jpeg (25) e' un valore di comodo, non un dato reale:
+    segnalarli produrrebbe solo avvisi da ignorare.
+    """
+    resolutions: dict[tuple[int, int], list[str]] = {}
+    rates: dict[float, list[str]] = {}
+
+    for path, info in cache.items():
+        if not info or not info.get("width"):
+            continue
+        name = path.name
+
+        if kinds.get(path) == "video":
+            resolutions.setdefault((info["width"], info["height"]), []).append(name)
+            if info.get("fps"):
+                rates.setdefault(round(float(info["fps"]), 2), []).append(name)
+
+
+    if len(resolutions) > 1:
+        detail = " · ".join(
+            f"{w}x{h}: {', '.join(sorted(set(names)))}" for (w, h), names in resolutions.items()
+        )
+        report.warnings.append(f"risoluzioni discordanti fra le sorgenti ({detail})")
+
+    if len(rates) > 1:
+        detail = " · ".join(
+            f"{fps:g} fps: {', '.join(sorted(set(names)))}" for fps, names in rates.items()
+        )
+        report.warnings.append(f"frame rate discordanti fra le sorgenti ({detail})")
+
+    for fps, names in rates.items():
+        if abs(fps - project.output.fps) > 0.01:
+            report.warnings.append(
+                f"{', '.join(sorted(set(names)))}: {fps:g} fps contro i "
+                f"{project.output.fps} fps dell'output: verra' ricampionato"
+            )
+
+
+def _check_audio(report: Report, project: Project, cache: dict) -> None:
+    """Avvisa se la traccia audio non copre tutto il montaggio."""
+    if project.audio is None:
+        return
+    info = _probe_cached(project.resolve(project.audio.src), cache)
+    if not info:
+        return
+    coperto = info["duration"] + project.audio.start
+    if coperto < report.duration - 0.05:
+        report.warnings.append(
+            f"la traccia audio copre {coperto:.2f}s dei {report.duration:.2f}s del "
+            "montaggio: il finale restera' in silenzio"
+        )
+
+
+def format_report(report: Report) -> str:
+    """Rende il riepilogo come testo pronto per il terminale."""
+    lines: list[str] = []
+    if report.project_path.name:
+        lines.append(f"Progetto : {report.project_path}")
+    lines.append(
+        f"Canvas   : {report.size[0]}x{report.size[1]} @ {report.fps} fps"
+    )
+    lines.append(f"Output   : {report.output_path}")
+    lines.append("")
+    label_width = max((len(row.label) for row in report.rows), default=0)
+    trans_width = max((len(row.transition_label()) for row in report.rows), default=0)
+    lines.append(
+        f"  #  inizio     fine    durata  {'transizione':<{trans_width}}  tipo   segmento"
+    )
+
+    for row in report.rows:
+        p = row.placement
+        lines.append(
+            f"{row.index:3d}  {format_time(p.start):>7}  {format_time(p.end):>7}"
+            f"  {p.duration:7.2f}s  {row.transition_label():<{trans_width}}  {row.kind:<5}  "
+            f"{row.label:<{label_width}}  {row.detail}".rstrip()
+        )
+
+    lines.append("")
+    lines.append(
+        f"Durata totale: {format_time(report.duration)}  ({report.duration:.2f}s, "
+        f"{int(report.duration * report.fps)} fotogrammi)"
+    )
+    dissolvenze = []
+    if report.fade_in:
+        dissolvenze.append(f"dal nero in {report.fade_in:g}s")
+    if report.fade_out:
+        dissolvenze.append(f"al nero negli ultimi {report.fade_out:g}s")
+    if dissolvenze:
+        lines.append(f"Dissolvenze : {', '.join(dissolvenze)}")
+
+    if report.overlays:
+        lines.append("")
+        lines.append(f"Sopra il montaggio ({len(report.overlays)}):")
+        lines.append("   inizio     fine  dove      cosa")
+        for row in report.overlays:
+            lines.append(
+                f"  {format_time(row.start):>7}  {format_time(row.end):>7}  "
+                f"{row.position:<8}  {row.detail}"
+            )
+
+    if report.warnings:
+        lines.append("")
+        lines.append(f"Avvisi ({len(report.warnings)}):")
+        lines.extend(f"  - {w}" for w in report.warnings)
+    else:
+        lines.append("")
+        lines.append("Nessun avviso.")
+
+    return "\n".join(lines)
